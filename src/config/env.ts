@@ -11,16 +11,15 @@ export const envOptionalString = (name: string) => Config.option(envString(name)
 export const envStringWithDefault = (name: string, fallback: string) =>
   envString(name).pipe(Config.withDefault(fallback));
 
-const readPreferredEnv = (names: ReadonlyArray<string>, fallback: string) =>
-  Effect.gen(function* () {
-    for (const name of names) {
-      const value = yield* envOptionalString(name);
-      if (Option.isSome(value) && value.value.trim().length > 0) {
-        return value.value.trim();
-      }
+const readPreferredEnv = Effect.fn(function* (names: ReadonlyArray<string>, fallback: string) {
+  for (const name of names) {
+    const value = yield* envOptionalString(name);
+    if (Option.isSome(value) && value.value.trim().length > 0) {
+      return value.value.trim();
     }
-    return fallback;
-  });
+  }
+  return fallback;
+});
 
 export const buildEnvironment = Effect.gen(function* () {
   const apiKey = yield* readPreferredEnv(["OPENAI_COMPACT_API_KEY", "GIT_AGENT_BUILD_API_KEY"], "");
