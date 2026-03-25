@@ -6,10 +6,14 @@ import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import PackageJson from "../package.json" with { type: "json" };
 import { commandRoot } from "./commands/root";
 import { renderError } from "./shared/errors";
+import { gitAgentProgressRenderConfig } from "./shared/progress-config";
+import { makeProgressLayer } from "./shared/tracing";
 
-const Live = Layer.mergeAll(NodeServices.layer, FetchHttpClient.layer).pipe(
-  Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv())),
-);
+const Live = Layer.mergeAll(
+  NodeServices.layer,
+  FetchHttpClient.layer,
+  makeProgressLayer(gitAgentProgressRenderConfig),
+).pipe(Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv())));
 
 const program = Command.run(commandRoot, {
   version: PackageJson.version,

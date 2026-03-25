@@ -11,6 +11,7 @@ import { resolveProviderConfig } from "../config/provider";
 import { emptyProjectConfig } from "../domain/project";
 import { ConfigError } from "../shared/errors";
 import { parseCsvValues } from "../shared/text";
+import { withProgressSpan } from "../shared/tracing";
 import { generateGitignore } from "../services/gitignore-service";
 import { generateProjectScopes } from "../services/scope-service";
 import { detectVcs, getVcsClient } from "../services/vcs";
@@ -24,40 +25,20 @@ import {
   vcsFlag,
 } from "./shared";
 
-export const commandInit = Command.make(
-  "init",
-  {
-    cwd: cwdFlag,
-    vcs: vcsFlag,
-    apiKey: apiKeyFlag,
-    baseUrl: baseUrlFlag,
-    model: modelFlag,
-    free: freeFlag,
-    scope: Flag.boolean("scope").pipe(Flag.withDescription("Generate scopes via AI.")),
-    gitignore: Flag.boolean("gitignore").pipe(Flag.withDescription("Generate .gitignore via AI.")),
-    force: Flag.boolean("force").pipe(
-      Flag.withDescription("Overwrite existing config or .gitignore."),
-    ),
-    maxCommits: Flag.integer("max-commits").pipe(
-      Flag.withDefault(200),
-      Flag.withDescription("Maximum commit count to analyze for scopes."),
-    ),
-    local: Flag.boolean("local").pipe(
-      Flag.withDescription("Write config to .git-agent/config.local.yml."),
-    ),
-    hook: Flag.string("hook").pipe(
-      Flag.withDescription("Hook to configure. Repeat the flag or use comma-separated values."),
-      Flag.between(0, Number.MAX_SAFE_INTEGER),
-    ),
-  },
-  Effect.fn(function* (input) {
+const runInitCommand = Effect.fn(
+  function* (input) {
     const fs = yield* FileSystem.FileSystem;
     const vcsKind = yield* detectVcs(input.cwd, toOptionalString(input.vcs));
+    yield* Effect.annotateCurrentSpan({
+      vcs: vcsKind,
+    });
     const vcs = getVcsClient(vcsKind);
     const isRepo = yield* vcs.isRepo(input.cwd);
     const hooks = parseCsvValues(input.hook);
     if (!isRepo) {
-      const output = yield* vcs.initRepo(input.cwd);
+      const output = yield* withProgressSpan(vcs.initRepo(input.cwd), "init.initialize-repository", {
+        vcs: vcsKind,
+      });
       if (output.length > 0) {
         yield* Console.log(output);
       }
@@ -76,9 +57,7 @@ export const commandInit = Command.make(
       );
     }
 
-    const configPath = yield* input.local
-      ? localConfigPath(repoRoot)
-      : projectConfigWritePath(repoRoot);
+    const configPath = yield* input.local ? localConfigPath(repoRoot) : projectConfigWritePath(repoRoot);
     if (!input.force) {
       const exists = yield* fs.exists(configPath);
       if (exists) {
@@ -109,24 +88,85 @@ export const commandInit = Command.make(
     }
 
     if (doGitignore || fullWizard) {
-      const techs = yield* generateGitignore(provider, vcs, repoRoot);
+      const techs = yield* withProgressSpan(generateGitignore(provider, vcs, repoRoot), "init.generate-gitignore", {
+        vcs: vcsKind,
+        full_wizard: fullWizard,
+      });
       yield* Console.log(`.gitignore updated: ${techs.join(", ")}`);
     }
 
     if (doScope || fullWizard) {
-      const scopes = yield* generateProjectScopes(provider, vcs, repoRoot, input.maxCommits);
+      const scopes = yield* withProgressSpan(
+        generateProjectScopes(provider, vcs, repoRoot, input.maxCommits),
+        "init.generate-scopes",
+        {
+          vcs: vcsKind,
+          full_wizard: fullWizard,
+          max_commits: input.maxCommits,
+        },
+      );
       yield* mergeAndSaveScopes(configPath, scopes);
       yield* Console.log(`scopes written to ${configPath}`);
     }
 
     if (fullWizard) {
-      yield* writeProjectField(configPath, "hook", "conventional");
+      yield* withProgressSpan(writeProjectField(configPath, "hook", "conventional"), "init.write-default-hook", {
+        path: configPath,
+      });
     } else if (hooks.length > 0) {
-      yield* writeProjectField(configPath, "hook", hooks.join(","));
+      yield* withProgressSpan(writeProjectField(configPath, "hook", hooks.join(",")), "init.write-hook", {
+        path: configPath,
+        hook_count: hooks.length,
+      });
     }
 
     if (!doScope && !doGitignore && !fullWizard && hooks.length > 0) {
-      yield* mergeAndSaveScopes(configPath, emptyProjectConfig().scopes);
+      yield* withProgressSpan(
+        mergeAndSaveScopes(configPath, emptyProjectConfig().scopes),
+        "init.write-project-config",
+        {
+          path: configPath,
+        },
+      );
     }
+  },
+  (effect, input) =>
+    withProgressSpan(effect, "init.run", {
+      force: input.force,
+      gitignore: input.gitignore,
+      local: input.local,
+      requested_vcs: toOptionalString(input.vcs) ?? "auto",
+      scope: input.scope,
+    }),
+);
+
+export const commandInit = Command.make(
+  "init",
+  {
+    cwd: cwdFlag,
+    vcs: vcsFlag,
+    apiKey: apiKeyFlag,
+    baseUrl: baseUrlFlag,
+    model: modelFlag,
+    free: freeFlag,
+    scope: Flag.boolean("scope").pipe(Flag.withDescription("Generate scopes via AI.")),
+    gitignore: Flag.boolean("gitignore").pipe(Flag.withDescription("Generate .gitignore via AI.")),
+    force: Flag.boolean("force").pipe(
+      Flag.withDescription("Overwrite existing config or .gitignore."),
+    ),
+    maxCommits: Flag.integer("max-commits").pipe(
+      Flag.withDefault(200),
+      Flag.withDescription("Maximum commit count to analyze for scopes."),
+    ),
+    local: Flag.boolean("local").pipe(
+      Flag.withDescription("Write config to .git-agent/config.local.yml."),
+    ),
+    hook: Flag.string("hook").pipe(
+      Flag.withDescription("Hook to configure. Repeat the flag or use comma-separated values."),
+      Flag.between(0, Number.MAX_SAFE_INTEGER),
+    ),
+  },
+  Effect.fn(function* (input) {
+    yield* runInitCommand(input);
   }),
 ).pipe(Command.withDescription("Initialize git-agent in the current repository."));
