@@ -2,7 +2,10 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { CommitGroup } from "../src/domain/commit";
 import type { CommitRequest } from "../src/services/commit-service";
-import { ensureJjWorkingCopyMatchesPlan } from "../src/services/commit-service";
+import {
+  ensureJjWorkingCopyMatchesPlan,
+  normalizePlannedGroups,
+} from "../src/services/commit-service";
 import type { VcsClient } from "../src/services/vcs";
 
 const makeRequest = (files: ReadonlyArray<string>) =>
@@ -46,5 +49,23 @@ describe("ensureJjWorkingCopyMatchesPlan", () => {
       message:
         "jj working copy drifted after commit; expected remaining files: src/feature.ts; actual remaining files: src/feature.ts, src/unexpected.ts",
     });
+  });
+});
+
+describe("normalizePlannedGroups", () => {
+  it("moves user-staged files into the first group and removes them from later groups", () => {
+    const groups = normalizePlannedGroups(
+      [group(["src/unstaged.ts"]), group(["src/staged.ts"])],
+      new Set(["src/staged.ts", "src/unstaged.ts"]),
+      ["src/staged.ts"],
+    );
+
+    expect(groups).toEqual([group(["src/staged.ts", "src/unstaged.ts"])]);
+  });
+
+  it("falls back to the real changed files when the planner omits every allowed file", () => {
+    const groups = normalizePlannedGroups([], new Set(["src/app.ts", "src/feature.ts"]), []);
+
+    expect(groups).toEqual([group(["src/app.ts", "src/feature.ts"])]);
   });
 });
