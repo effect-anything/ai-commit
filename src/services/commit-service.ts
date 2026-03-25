@@ -98,33 +98,42 @@ const filterPlanFiles = (
     }))
     .filter((group) => group.files.length > 0);
 
-const appendPassthroughFiles = (
+export const normalizePlannedGroups = (
   groups: Array<CommitGroup>,
   allowed: ReadonlySet<string>,
+  stagedFiles: ReadonlyArray<string> = [],
 ): Array<CommitGroup> => {
-  if (groups.length === 0) {
-    return groups;
-  }
   const inPlan = new Set(groups.flatMap((group) => group.files));
   const passthrough = [...allowed].filter((file) => !inPlan.has(file)).sort();
-  if (passthrough.length === 0) {
-    return groups;
+  const staged = stagedFiles.filter((file) => allowed.has(file));
+  const stagedSet = new Set(staged);
+  const [first = { files: [], message: undefined }, ...rest] = groups;
+  const firstFiles = [
+    ...staged,
+    ...first.files.filter((file) => !stagedSet.has(file)),
+    ...passthrough.filter((file) => !stagedSet.has(file)),
+  ];
+
+  if (firstFiles.length === 0) {
+    return [];
   }
-  const [first, ...rest] = groups;
-  if (first == null) {
-    return groups;
-  }
+
   return [
     {
       ...first,
-      files: [...first.files, ...passthrough],
+      files: firstFiles,
     },
-    ...rest,
+    ...rest
+      .map((group) => ({
+        ...group,
+        files: group.files.filter((file) => !stagedSet.has(file)),
+      }))
+      .filter((group) => group.files.length > 0),
   ];
 };
 
 const hasUnscopedGroups = (groups: ReadonlyArray<CommitGroup>): boolean =>
-  groups.some((group) => (group.message?.title ?? "").includes("(") === false);
+  groups.some((group) => group.message != null && group.message.title.includes("(") === false);
 
 const commitStepLabel = (completed: number, queued: number): string => `${completed + 1}/${queued}`;
 
@@ -226,7 +235,7 @@ const planGroups = Effect.fn(function* (
   });
   const allowed = new Set(allFiles);
   const filtered = filterPlanFiles(plan.groups, allowed);
-  return appendPassthroughFiles(filtered, allowed).slice(0, maxCommitGroups);
+  return normalizePlannedGroups(filtered, allowed, stagedFiles).slice(0, maxCommitGroups);
 });
 
 class RetryableHookRejectionError extends Schema.TaggedErrorClass<RetryableHookRejectionError>()(
