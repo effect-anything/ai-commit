@@ -39,6 +39,11 @@ const diffFrom = (files: ReadonlyArray<string>, content: string): VcsDiff => ({
   lines: countLines(content),
 });
 
+const renderProcessOutput = (stdout: string, stderr: string): string | undefined => {
+  const combined = [stdout.trim(), stderr.trim()].filter((value) => value.length > 0).join("\n");
+  return combined.length > 0 ? combined : undefined;
+};
+
 const shouldSkipDir = (name: string): boolean =>
   new Set([
     ".git",
@@ -364,7 +369,7 @@ const gitClient: VcsClient = {
         cwd,
         env: { GIT_AGENT: "1" },
       }),
-      (result) => result.stdout.trim(),
+      (result) => renderProcessOutput(result.stdout, result.stderr) ?? "",
     ),
   amendCommit: (cwd, message) =>
     Effect.map(
@@ -374,7 +379,7 @@ const gitClient: VcsClient = {
         cwd,
         env: { GIT_AGENT: "1" },
       }),
-      (result) => result.stdout.trim(),
+      (result) => renderProcessOutput(result.stdout, result.stderr) ?? "",
     ),
   lastCommitDiff: (cwd) =>
     Effect.all({
@@ -500,7 +505,7 @@ const jjClient: VcsClient = {
         args: ["commit", "-m", message, ...files],
         cwd,
       }),
-      (result) => result.stdout.trim(),
+      (result) => renderProcessOutput(result.stdout, result.stderr) ?? "",
     ),
   amendCommit: (cwd, message) =>
     Effect.map(
@@ -509,7 +514,7 @@ const jjClient: VcsClient = {
         args: ["describe", "@-", "-m", message],
         cwd,
       }),
-      (result) => result.stdout.trim(),
+      (result) => renderProcessOutput(result.stdout, result.stderr) ?? "",
     ),
   lastCommitDiff: (cwd) =>
     Effect.all({

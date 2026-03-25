@@ -5,6 +5,7 @@ import type { ProjectConfig } from "../domain/project";
 import { emptyProjectConfig } from "../domain/project";
 import { HookBlockedError, UnsupportedFeatureError } from "../shared/errors";
 import { countLines } from "../shared/text";
+import { withProgressSpan } from "../shared/tracing";
 import { executeHooks } from "./hooks";
 import { generateCommitMessage, planCommits, type ProviderConfig } from "./openai-client";
 import { generateProjectScopes } from "./scope-service";
@@ -110,18 +111,20 @@ const appendPassthroughFiles = (
 const hasUnscopedGroups = (groups: ReadonlyArray<CommitGroup>): boolean =>
   groups.some((group) => (group.message?.title ?? "").includes("(") === false);
 
+const commitStepLabel = (completed: number, queued: number): string => `${completed + 1}/${queued}`;
+
 const assembleMessage = (message: CommitMessage): string => {
   const body = renderCommitBody(message);
   return body.length === 0 ? message.title : `${message.title}\n\n${body}`;
 };
 
-const withAutoScopes = (
-  provider: ProviderConfig,
-  vcs: VcsClient,
-  cwd: string,
-  projectConfig?: ProjectConfig,
-) =>
-  Effect.gen(function* () {
+const withAutoScopes = Effect.fn(
+  function* (
+    provider: ProviderConfig,
+    vcs: VcsClient,
+    cwd: string,
+    projectConfig?: ProjectConfig,
+  ) {
     if (projectConfig != null && projectConfig.scopes.length > 0) {
       return projectConfig;
     }
@@ -133,7 +136,12 @@ const withAutoScopes = (
     const repoRoot = yield* vcs.repoRoot(cwd);
     yield* mergeAndSaveScopes(yield* projectConfigPath(repoRoot), scopes);
     return nextConfig;
-  });
+  },
+  (effect, _provider, vcs) =>
+    withProgressSpan(effect, "commit.generate-scopes", {
+      vcs: vcs.kind,
+    }),
+);
 
 const planGroups = (
   provider: ProviderConfig,
@@ -161,81 +169,101 @@ const planGroups = (
 
 const commitGit = (request: CommitRequest, config: ProjectConfig) =>
   Effect.gen(function* () {
-    const preStaged = request.noStage
-      ? yield* request.vcs.stagedDiff(request.cwd)
-      : yield* request.vcs.stagedDiff(request.cwd);
-    let staged = preStaged;
-    let unstaged = request.noStage
-      ? ({ files: [], content: "", lines: 0 } satisfies VcsDiff)
-      : yield* request.vcs.unstagedDiff(request.cwd);
+    const { promptStaged, promptUnstaged } = yield* withProgressSpan(
+      Effect.gen(function* () {
+        const preStaged = request.noStage
+          ? yield* request.vcs.stagedDiff(request.cwd)
+          : yield* request.vcs.stagedDiff(request.cwd);
+        let staged = preStaged;
+        let unstaged = request.noStage
+          ? ({ files: [], content: "", lines: 0 } satisfies VcsDiff)
+          : yield* request.vcs.unstagedDiff(request.cwd);
 
-    if (!request.noStage) {
-      yield* request.vcs.addAll(request.cwd);
-      const full = yield* request.vcs.stagedDiff(request.cwd);
-      if (full.files.length === 0) {
-        return yield* Effect.fail(new UnsupportedFeatureError({ message: "no changes" }));
-      }
+        if (!request.noStage) {
+          yield* request.vcs.addAll(request.cwd);
+          const full = yield* request.vcs.stagedDiff(request.cwd);
+          if (full.files.length === 0) {
+            return yield* Effect.fail(new UnsupportedFeatureError({ message: "no changes" }));
+          }
 
-      if (preStaged.files.length === 0) {
-        staged = { files: [], content: "", lines: 0 };
-        unstaged = full;
-      } else {
-        const userStaged = new Set(preStaged.files);
-        const newFiles = full.files.filter((file) => !userStaged.has(file));
-        staged = preStaged;
-        unstaged =
-          newFiles.length === 0
-            ? { files: [], content: "", lines: 0 }
-            : yield* request.vcs.diffForFiles(request.cwd, newFiles);
-      }
-    } else if (staged.files.length === 0) {
-      return yield* Effect.fail(
-        new UnsupportedFeatureError({
-          message: "no staged changes (hint: stage files with git add, or remove --no-stage)",
-        }),
-      );
-    }
+          if (preStaged.files.length === 0) {
+            staged = { files: [], content: "", lines: 0 };
+            unstaged = full;
+          } else {
+            const userStaged = new Set(preStaged.files);
+            const newFiles = full.files.filter((file) => !userStaged.has(file));
+            staged = preStaged;
+            unstaged =
+              newFiles.length === 0
+                ? { files: [], content: "", lines: 0 }
+                : yield* request.vcs.diffForFiles(request.cwd, newFiles);
+          }
+        } else if (staged.files.length === 0) {
+          return yield* Effect.fail(
+            new UnsupportedFeatureError({
+              message: "no staged changes (hint: stage files with git add, or remove --no-stage)",
+            }),
+          );
+        }
 
-    const promptStaged =
-      request.maxDiffLines > 0
-        ? truncateDiff(filterDiffForPrompt(staged), request.maxDiffLines)
-        : filterDiffForPrompt(staged);
-    const promptUnstaged =
-      request.maxDiffLines > 0
-        ? truncateDiff(filterDiffForPrompt(unstaged), request.maxDiffLines)
-        : filterDiffForPrompt(unstaged);
+        const promptStaged =
+          request.maxDiffLines > 0
+            ? truncateDiff(filterDiffForPrompt(staged), request.maxDiffLines)
+            : filterDiffForPrompt(staged);
+        const promptUnstaged =
+          request.maxDiffLines > 0
+            ? truncateDiff(filterDiffForPrompt(unstaged), request.maxDiffLines)
+            : filterDiffForPrompt(unstaged);
 
-    const configWithScopes = yield* withAutoScopes(
-      request.provider,
-      request.vcs,
-      request.cwd,
-      config,
-    );
-    let groups = yield* planGroups(
-      request.provider,
-      promptStaged.files,
-      promptUnstaged.files,
-      request.intent,
-      configWithScopes,
+        return { promptStaged, promptUnstaged };
+      }),
+      "commit.scan-changes",
+      {
+        vcs: "git",
+        no_stage: request.noStage,
+        dry_run: request.dryRun,
+      },
     );
 
-    if (configWithScopes.scopes.length > 0 && hasUnscopedGroups(groups)) {
-      const refreshedScopes = yield* generateProjectScopes(
-        request.provider,
-        request.vcs,
-        request.cwd,
-        200,
-      );
-      const repoRoot = yield* request.vcs.repoRoot(request.cwd);
-      yield* mergeAndSaveScopes(yield* projectConfigPath(repoRoot), refreshedScopes);
-      groups = yield* planGroups(
+    const configWithScopes =
+      config.scopes.length > 0
+        ? config
+        : yield* withAutoScopes(request.provider, request.vcs, request.cwd, config);
+    let groups = yield* withProgressSpan(
+      planGroups(
         request.provider,
         promptStaged.files,
         promptUnstaged.files,
         request.intent,
+        configWithScopes,
+      ),
+      "commit.plan-groups",
+      {
+        vcs: "git",
+        staged_files: promptStaged.files.length,
+        unstaged_files: promptUnstaged.files.length,
+      },
+    );
+
+    if (configWithScopes.scopes.length > 0 && hasUnscopedGroups(groups)) {
+      const refreshedScopes = yield* withProgressSpan(
+        generateProjectScopes(request.provider, request.vcs, request.cwd, 200),
+        "commit.refresh-scopes",
         {
+          vcs: "git",
+        },
+      );
+      const repoRoot = yield* request.vcs.repoRoot(request.cwd);
+      yield* mergeAndSaveScopes(yield* projectConfigPath(repoRoot), refreshedScopes);
+      groups = yield* withProgressSpan(
+        planGroups(request.provider, promptStaged.files, promptUnstaged.files, request.intent, {
           ...configWithScopes,
           scopes: refreshedScopes,
+        }),
+        "commit.replan-groups",
+        {
+          vcs: "git",
+          reason: "unscoped-groups",
         },
       );
     }
@@ -258,6 +286,8 @@ const commitGit = (request: CommitRequest, config: ProjectConfig) =>
         continue;
       }
 
+      const step = commitStepLabel(results.length, results.length + remaining.length + 1);
+
       const promptDiff =
         request.maxDiffLines > 0
           ? truncateDiff(filterDiffForPrompt(groupDiff), request.maxDiffLines)
@@ -268,14 +298,24 @@ const commitGit = (request: CommitRequest, config: ProjectConfig) =>
       let accepted: CommitMessage | undefined;
 
       for (let attempt = 0; attempt < maxHookRetries; attempt += 1) {
-        const message = yield* generateCommitMessage({
-          provider: request.provider,
-          diff: promptDiff,
-          intent: request.intent,
-          config: configWithScopes,
-          hookFeedback: hookFeedback.length > 0 ? hookFeedback : undefined,
-          previousMessage,
-        });
+        const message = yield* withProgressSpan(
+          generateCommitMessage({
+            provider: request.provider,
+            diff: promptDiff,
+            intent: request.intent,
+            config: configWithScopes,
+            hookFeedback: hookFeedback.length > 0 ? hookFeedback : undefined,
+            previousMessage,
+          }),
+          "commit.generate-message",
+          {
+            vcs: "git",
+            group_index: results.length + 1,
+            group_total: results.length + remaining.length + 1,
+            attempt: attempt + 1,
+            file_count: group.files.length,
+          },
+        );
         const assembled = yield* request.vcs.formatTrailers(
           request.cwd,
           assembleMessage(message),
@@ -288,13 +328,22 @@ const commitGit = (request: CommitRequest, config: ProjectConfig) =>
           break;
         }
 
-        const hookResult = yield* executeHooks(configWithScopes.hooks, {
-          diff: groupDiff.content,
-          commitMessage: assembled,
-          intent: request.intent,
-          stagedFiles: groupDiff.files,
-          config: configWithScopes,
-        });
+        const hookResult = yield* withProgressSpan(
+          executeHooks(configWithScopes.hooks, {
+            diff: groupDiff.content,
+            commitMessage: assembled,
+            intent: request.intent,
+            stagedFiles: groupDiff.files,
+            config: configWithScopes,
+          }),
+          "commit.run-hooks",
+          {
+            vcs: "git",
+            group_index: results.length + 1,
+            group_total: results.length + remaining.length + 1,
+            hook_count: configWithScopes.hooks.length,
+          },
+        );
 
         if (hookResult.exitCode === 0) {
           accepted = message;
@@ -320,12 +369,14 @@ const commitGit = (request: CommitRequest, config: ProjectConfig) =>
         const regroupedFiles = [
           ...new Set([...(group.files ?? []), ...remaining.flatMap((item) => item.files)]),
         ];
-        remaining = yield* planGroups(
-          request.provider,
-          regroupedFiles,
-          [],
-          request.intent,
-          configWithScopes,
+        remaining = yield* withProgressSpan(
+          planGroups(request.provider, regroupedFiles, [], request.intent, configWithScopes),
+          "commit.replan-groups",
+          {
+            vcs: "git",
+            reason: "hook-failures",
+            file_count: regroupedFiles.length,
+          },
         );
         continue;
       }
@@ -337,13 +388,24 @@ const commitGit = (request: CommitRequest, config: ProjectConfig) =>
       );
       const result: SingleCommitResult = {
         title: accepted.title,
+        bullets: accepted.bullets,
         explanation: accepted.explanation,
         files: [...group.files],
         output: undefined,
       };
 
       if (!request.dryRun) {
-        const output = yield* request.vcs.commit(request.cwd, finalMessage);
+        const output = yield* withProgressSpan(
+          request.vcs.commit(request.cwd, finalMessage),
+          "commit.create",
+          {
+            vcs: "git",
+            group_index: results.length + 1,
+            group_total: results.length + remaining.length + 1,
+            file_count: group.files.length,
+            step,
+          },
+        );
         results.push({
           ...result,
           output,
@@ -367,27 +429,33 @@ const commitJj = (request: CommitRequest, config: ProjectConfig) =>
       );
     }
 
-    const fullDiff = yield* request.vcs.unstagedDiff(request.cwd);
-    if (fullDiff.files.length === 0) {
-      return yield* Effect.fail(new UnsupportedFeatureError({ message: "no changes" }));
-    }
-
-    const promptDiff =
-      request.maxDiffLines > 0
-        ? truncateDiff(filterDiffForPrompt(fullDiff), request.maxDiffLines)
-        : filterDiffForPrompt(fullDiff);
-    const configWithScopes = yield* withAutoScopes(
-      request.provider,
-      request.vcs,
-      request.cwd,
-      config,
+    const promptDiff = yield* withProgressSpan(
+      Effect.gen(function* () {
+        const fullDiff = yield* request.vcs.unstagedDiff(request.cwd);
+        if (fullDiff.files.length === 0) {
+          return yield* Effect.fail(new UnsupportedFeatureError({ message: "no changes" }));
+        }
+        return request.maxDiffLines > 0
+          ? truncateDiff(filterDiffForPrompt(fullDiff), request.maxDiffLines)
+          : filterDiffForPrompt(fullDiff);
+      }),
+      "commit.scan-changes",
+      {
+        vcs: "jj",
+        dry_run: request.dryRun,
+      },
     );
-    let groups = yield* planGroups(
-      request.provider,
-      [],
-      promptDiff.files,
-      request.intent,
-      configWithScopes,
+    const configWithScopes =
+      config.scopes.length > 0
+        ? config
+        : yield* withAutoScopes(request.provider, request.vcs, request.cwd, config);
+    let groups = yield* withProgressSpan(
+      planGroups(request.provider, [], promptDiff.files, request.intent, configWithScopes),
+      "commit.plan-groups",
+      {
+        vcs: "jj",
+        unstaged_files: promptDiff.files.length,
+      },
     );
 
     const results: Array<SingleCommitResult> = [];
@@ -406,6 +474,8 @@ const commitJj = (request: CommitRequest, config: ProjectConfig) =>
         continue;
       }
 
+      const step = commitStepLabel(results.length, results.length + remaining.length + 1);
+
       const truncated =
         request.maxDiffLines > 0
           ? truncateDiff(filterDiffForPrompt(groupDiff), request.maxDiffLines)
@@ -416,14 +486,24 @@ const commitJj = (request: CommitRequest, config: ProjectConfig) =>
       let accepted: CommitMessage | undefined;
 
       for (let attempt = 0; attempt < maxHookRetries; attempt += 1) {
-        const message = yield* generateCommitMessage({
-          provider: request.provider,
-          diff: truncated,
-          intent: request.intent,
-          config: configWithScopes,
-          hookFeedback: hookFeedback.length > 0 ? hookFeedback : undefined,
-          previousMessage,
-        });
+        const message = yield* withProgressSpan(
+          generateCommitMessage({
+            provider: request.provider,
+            diff: truncated,
+            intent: request.intent,
+            config: configWithScopes,
+            hookFeedback: hookFeedback.length > 0 ? hookFeedback : undefined,
+            previousMessage,
+          }),
+          "commit.generate-message",
+          {
+            vcs: "jj",
+            group_index: results.length + 1,
+            group_total: results.length + remaining.length + 1,
+            attempt: attempt + 1,
+            file_count: group.files.length,
+          },
+        );
         const assembled = yield* request.vcs.formatTrailers(
           request.cwd,
           assembleMessage(message),
@@ -436,13 +516,22 @@ const commitJj = (request: CommitRequest, config: ProjectConfig) =>
           break;
         }
 
-        const hookResult = yield* executeHooks(configWithScopes.hooks, {
-          diff: groupDiff.content,
-          commitMessage: assembled,
-          intent: request.intent,
-          stagedFiles: groupDiff.files,
-          config: configWithScopes,
-        });
+        const hookResult = yield* withProgressSpan(
+          executeHooks(configWithScopes.hooks, {
+            diff: groupDiff.content,
+            commitMessage: assembled,
+            intent: request.intent,
+            stagedFiles: groupDiff.files,
+            config: configWithScopes,
+          }),
+          "commit.run-hooks",
+          {
+            vcs: "jj",
+            group_index: results.length + 1,
+            group_total: results.length + remaining.length + 1,
+            hook_count: configWithScopes.hooks.length,
+          },
+        );
 
         if (hookResult.exitCode === 0) {
           accepted = message;
@@ -468,12 +557,14 @@ const commitJj = (request: CommitRequest, config: ProjectConfig) =>
         const regroupedFiles = [
           ...new Set([...(group.files ?? []), ...remaining.flatMap((item) => item.files)]),
         ];
-        remaining = yield* planGroups(
-          request.provider,
-          [],
-          regroupedFiles,
-          request.intent,
-          configWithScopes,
+        remaining = yield* withProgressSpan(
+          planGroups(request.provider, [], regroupedFiles, request.intent, configWithScopes),
+          "commit.replan-groups",
+          {
+            vcs: "jj",
+            reason: "hook-failures",
+            file_count: regroupedFiles.length,
+          },
         );
         continue;
       }
@@ -485,13 +576,24 @@ const commitJj = (request: CommitRequest, config: ProjectConfig) =>
       );
       const result: SingleCommitResult = {
         title: accepted.title,
+        bullets: accepted.bullets,
         explanation: accepted.explanation,
         files: [...group.files],
         output: undefined,
       };
 
       if (!request.dryRun) {
-        const output = yield* request.vcs.commit(request.cwd, finalMessage, group.files);
+        const output = yield* withProgressSpan(
+          request.vcs.commit(request.cwd, finalMessage, group.files),
+          "commit.create",
+          {
+            vcs: "jj",
+            group_index: results.length + 1,
+            group_total: results.length + remaining.length + 1,
+            file_count: group.files.length,
+            step,
+          },
+        );
         results.push({
           ...result,
           output,
@@ -507,11 +609,17 @@ const commitJj = (request: CommitRequest, config: ProjectConfig) =>
     } satisfies CommitResponse;
   });
 
-export const runCommitService = (request: CommitRequest) =>
-  Effect.gen(function* () {
+export const runCommitService = Effect.fn(
+  function* (request: CommitRequest) {
     const config = request.projectConfig ?? emptyProjectConfig();
     if (request.amend) {
-      const diff = yield* request.vcs.lastCommitDiff(request.cwd);
+      const diff = yield* withProgressSpan(
+        request.vcs.lastCommitDiff(request.cwd),
+        "commit.load-previous",
+        {
+          vcs: request.vcs.kind,
+        },
+      );
       if (diff.files.length === 0) {
         return yield* Effect.fail(
           new UnsupportedFeatureError({ message: "no previous commit to amend" }),
@@ -521,14 +629,21 @@ export const runCommitService = (request: CommitRequest) =>
         request.maxDiffLines > 0
           ? truncateDiff(filterDiffForPrompt(diff), request.maxDiffLines)
           : filterDiffForPrompt(diff);
-      const message = yield* generateCommitMessage({
-        provider: request.provider,
-        diff: truncated,
-        intent: request.intent,
-        config,
-        hookFeedback: undefined,
-        previousMessage: undefined,
-      });
+      const message = yield* withProgressSpan(
+        generateCommitMessage({
+          provider: request.provider,
+          diff: truncated,
+          intent: request.intent,
+          config,
+          hookFeedback: undefined,
+          previousMessage: undefined,
+        }),
+        "commit.generate-amend-message",
+        {
+          vcs: request.vcs.kind,
+          file_count: diff.files.length,
+        },
+      );
       const assembled = yield* request.vcs.formatTrailers(
         request.cwd,
         assembleMessage(message),
@@ -536,12 +651,20 @@ export const runCommitService = (request: CommitRequest) =>
       );
       const result: SingleCommitResult = {
         title: message.title,
+        bullets: message.bullets,
         explanation: message.explanation,
         files: diff.files,
         output: undefined,
       };
       if (!request.dryRun) {
-        const output = yield* request.vcs.amendCommit(request.cwd, assembled);
+        const output = yield* withProgressSpan(
+          request.vcs.amendCommit(request.cwd, assembled),
+          "commit.amend",
+          {
+            vcs: request.vcs.kind,
+            file_count: diff.files.length,
+          },
+        );
         return {
           commits: [
             {
@@ -561,4 +684,12 @@ export const runCommitService = (request: CommitRequest) =>
     return yield* request.vcs.kind === "git"
       ? commitGit(request, config)
       : commitJj(request, config);
-  });
+  },
+  (effect, request) =>
+    withProgressSpan(effect, "commit.run", {
+      amend: request.amend,
+      dry_run: request.dryRun,
+      no_stage: request.noStage,
+      vcs: request.vcs.kind,
+    }),
+);
