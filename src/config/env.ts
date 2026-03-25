@@ -1,7 +1,7 @@
 import { Config, Effect, Option } from "effect";
 
 export const DefaultBaseUrl = "https://api.openai.com/v1";
-export const DefaultModel = "gpt-4.1-mini";
+export const DefaultModel = "gpt-4o-mini";
 export const DefaultGitignoreBaseUrl = "https://www.toptal.com/developers/gitignore/api";
 
 export const envString = (name: string) => Config.string(name);
