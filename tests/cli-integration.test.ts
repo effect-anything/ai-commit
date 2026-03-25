@@ -276,6 +276,9 @@ describe.concurrent("CLI integration", () => {
         );
 
         expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("init.generate-gitignore");
+        expect(result.stdout).toContain("init.generate-scopes");
+        expect(result.stdout).toContain("init.write-default-hook");
         expect(result.stdout).toContain(".gitignore updated: node");
         expect(result.stdout).toContain("scopes written");
 
@@ -517,6 +520,18 @@ describe.concurrent("CLI integration", () => {
 
         expect(result.exitCode).toBe(0);
         expect(llm.remainingResponses()).toBe(0);
+        expect(result.stdout).toContain("commit.scan-changes");
+        expect(result.stdout).toContain("commit.plan-groups");
+        expect(result.stdout).toContain("commit.generate-message");
+        expect(result.stdout).toContain("group_index=1");
+        expect(result.stdout).toContain("commit.create");
+        expect(result.stdout).toContain("Created 2 commits.");
+        expect(result.stdout).toContain("1. feat(api): update routes");
+        expect(result.stdout).toContain("Files: api/routes.ts");
+        expect(result.stdout).toContain("- Adjust API routing output");
+        expect(result.stdout).toContain("2. feat(web): refresh page");
+        expect(result.stdout).toContain("Files: web/page.tsx");
+        expect(result.stdout).toContain("- Refresh dashboard copy");
 
         const subjects = trimmedLines((yield* git(repo, ["log", "--format=%s", "-n", "2"])).stdout);
         expect(subjects).toEqual(["feat(web): refresh page", "feat(api): update routes"]);
@@ -825,6 +840,20 @@ describe.concurrent("CLI integration", () => {
 
         expect(result.exitCode).toBe(0);
         expect(llm.remainingResponses()).toBe(0);
+        expect(result.stdout).toContain("commit.scan-changes");
+        expect(result.stdout).toContain('vcs="jj"');
+        expect(result.stdout).toContain("commit.plan-groups");
+        expect(result.stdout).toContain("commit.generate-message");
+        expect(result.stdout).toContain("commit.create");
+        expect(result.stdout).toContain("Created 2 commits.");
+        expect(result.stdout).toContain("1. fix(cli): refine app output");
+        expect(result.stdout).toContain("Files: src/app.ts");
+        expect(result.stdout).toContain("- Update the working-copy value");
+        expect(result.stdout).toContain("2. fix(core): adjust feature flag");
+        expect(result.stdout).toContain("Files: src/feature.ts");
+        expect(result.stdout).toContain("- Update the feature toggle");
+        expect(result.stdout).toContain("Working copy  (@) now at:");
+        expect(result.stdout).toContain("Parent commit (@-)");
 
         const descriptions = trimmedLines(
           (yield* jj(repo, [
