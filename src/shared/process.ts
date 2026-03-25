@@ -69,7 +69,7 @@ export const runProcess = ({
       return result;
     }).pipe(
       Effect.catch((cause) =>
-        cause instanceof ProcessExecutionError
+        ProcessExecutionError.is(cause)
           ? Effect.failSync(() => cause)
           : Effect.failSync(() => toProcessExecutionError(command, args, cause)),
       ),
