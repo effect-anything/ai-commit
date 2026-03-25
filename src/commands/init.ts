@@ -4,7 +4,6 @@ import {
   projectConfigWritePath,
   localConfigPath,
   mergeAndSaveScopes,
-  projectConfigPath,
   writeProjectField,
 } from "../config/project";
 import { resolveProviderConfig } from "../config/provider";
