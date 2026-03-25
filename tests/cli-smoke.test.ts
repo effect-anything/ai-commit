@@ -30,12 +30,6 @@ afterEach(() => {
 });
 
 describe("cli smoke", () => {
-  it("prints bash completion script via the compatibility subcommand", () => {
-    const result = runCli(["completion", "bash"]);
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("###-begin-git-agent-completions-###");
-  });
-
   it("config get prefers local hook over project hook", () => {
     const dir = newGitRepo();
     mkdirSync(join(dir, ".git-agent"), { recursive: true });

@@ -587,7 +587,6 @@ class ProgressTreeRenderer implements ProgressLoggerService {
         ),
       ].join(""),
     );
-    lines.push(" ");
 
     for (const rootId of this.rootOrder) {
       const root = this.nodes.get(rootId);
@@ -601,12 +600,10 @@ class ProgressTreeRenderer implements ProgressLoggerService {
       const path = this.pathOf(active)
         .map((node) => formatSpanDisplayName(node.name, node.span, this.config, "interactive"))
         .join(" > ");
-      lines.push(" ");
       lines.push(
         `${maybeColor(this.color, ansi.dim, "Active:")} ${maybeColor(this.color, ansi.bold, path)}`,
       );
     } else if (final) {
-      lines.push(" ");
       lines.push(
         `${maybeColor(
           this.color,
@@ -803,16 +800,6 @@ export const ProgressLoggerLive = Layer.effect(
     (logger) => Effect.sync(() => logger.close()),
   ),
 );
-
-export const withProgressSpan = <A, E, R>(
-  effect: Effect.Effect<A, E, R>,
-  name: string,
-  attributes?: Record<string, unknown>,
-) =>
-  Effect.withSpan(effect, name, {
-    attributes,
-    captureStackTrace: false,
-  });
 
 export const ProgressTracingLayer = Layer.effect(
   Tracer.Tracer,

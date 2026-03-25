@@ -19,58 +19,55 @@ import {
   writeTextFile,
 } from "./integration/helpers";
 
-const seedGitRepo = () =>
-  Effect.gen(function* () {
-    const repo = yield* createGitRepo();
-    yield* writeTextFile(repo, "api/routes.ts", "export const route = 'v1';\n");
-    yield* writeTextFile(repo, "web/page.tsx", "export const page = 'home';\n");
-    yield* gitCommitAll(repo, "chore: seed repo");
-    return repo;
-  });
+const seedGitRepo = Effect.fn(function* () {
+  const repo = yield* createGitRepo();
+  yield* writeTextFile(repo, "api/routes.ts", "export const route = 'v1';\n");
+  yield* writeTextFile(repo, "web/page.tsx", "export const page = 'home';\n");
+  yield* gitCommitAll(repo, "chore: seed repo");
+  return repo;
+});
 
-const seedGitRepoWithScopes = () =>
-  Effect.gen(function* () {
-    const repo = yield* seedGitRepo();
-    yield* writeTextFile(
-      repo,
-      ".git-agent/config.yml",
-      projectScopesConfig([
-        ["api", "Backend API handlers"],
-        ["web", "Frontend pages"],
-        ["core", "Shared application logic"],
-      ]),
-    );
-    return repo;
-  });
+const seedGitRepoWithScopes = Effect.fn(function* () {
+  const repo = yield* seedGitRepo();
+  yield* writeTextFile(
+    repo,
+    ".git-agent/config.yml",
+    projectScopesConfig([
+      ["api", "Backend API handlers"],
+      ["web", "Frontend pages"],
+      ["core", "Shared application logic"],
+    ]),
+  );
+  return repo;
+});
 
-const seedJjRepo = () =>
-  Effect.gen(function* () {
-    const repo = yield* createJjRepo();
-    yield* writeTextFile(repo, "src/app.ts", "export const value = 'before';\n");
-    yield* writeTextFile(repo, "src/feature.ts", "export const feature = true;\n");
-    yield* jjCommitAll(repo, "chore: seed repo", ["src/app.ts", "src/feature.ts"]);
-    return repo;
-  });
+const seedJjRepo = Effect.fn(function* () {
+  const repo = yield* createJjRepo();
+  yield* writeTextFile(repo, "src/app.ts", "export const value = 'before';\n");
+  yield* writeTextFile(repo, "src/feature.ts", "export const feature = true;\n");
+  yield* jjCommitAll(repo, "chore: seed repo", ["src/app.ts", "src/feature.ts"]);
+  return repo;
+});
 
-const seedJjRepoWithScopes = () =>
-  Effect.gen(function* () {
-    const repo = yield* seedJjRepo();
-    yield* writeTextFile(
-      repo,
-      ".git-agent/config.yml",
-      projectScopesConfig([
-        ["cli", "Command line flows"],
-        ["core", "Shared application logic"],
-      ]),
-    );
-    yield* jjCommitAll(repo, "chore: add repo config", [".git-agent/config.yml"]);
-    return repo;
-  });
+const seedJjRepoWithScopes = Effect.fn(function* () {
+  const repo = yield* seedJjRepo();
+  yield* writeTextFile(
+    repo,
+    ".git-agent/config.yml",
+    projectScopesConfig([
+      ["cli", "Command line flows"],
+      ["core", "Shared application logic"],
+    ]),
+  );
+  yield* jjCommitAll(repo, "chore: add repo config", [".git-agent/config.yml"]);
+  return repo;
+});
 
 describe.concurrent("CLI integration", () => {
   layer(NodeServices.layer)((it) => {
-    it.effect("get prefers local hook over project hook", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "get prefers local hook over project hook",
+      Effect.fn(function* () {
         const repo = yield* createGitRepo();
         yield* writeTextFile(repo, ".git-agent/config.yml", "hook:\n  - conventional\n");
         yield* writeTextFile(repo, ".git-agent/config.local.yml", "hook:\n  - empty\n");
@@ -85,8 +82,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("config set hook installs the script into .git-agent/hooks", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "config set hook installs the script into .git-agent/hooks",
+      Effect.fn(function* () {
         const repo = yield* createGitRepo();
         const hookPath = yield* writeTextFile(repo, "scripts/pre-commit.sh", "#!/bin/sh\nexit 0\n");
         yield* chmodFile(hookPath, 0o755);
@@ -102,8 +100,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("config show resolves provider settings from user scope", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "config show resolves provider settings from user scope",
+      Effect.fn(function* () {
         const repo = yield* createGitRepo();
         const result = yield* runCli(["config", "show"], {
           cwd: repo,
@@ -121,8 +120,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("config set model defaults to user scope and writes isolated user config", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "config set model defaults to user scope and writes isolated user config",
+      Effect.fn(function* () {
         const repo = yield* createGitRepo();
         const result = yield* runCli(["config", "set", "model", "gpt-4o-mini"], {
           cwd: repo,
@@ -136,8 +136,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("config set rejects provider keys in project scope", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "config set rejects provider keys in project scope",
+      Effect.fn(function* () {
         const repo = yield* createGitRepo();
         const result = yield* runCli(
           ["config", "set", "--scope", "project", "api_key", "sk-test"],
@@ -149,8 +150,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("init --local rejects runs that do not request any action", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "init --local rejects runs that do not request any action",
+      Effect.fn(function* () {
         const repo = yield* createGitRepo();
         const result = yield* runCli(["init", "--local"], { cwd: repo });
 
@@ -159,8 +161,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("git init --scope writes generated scopes into project config", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "git init --scope writes generated scopes into project config",
+      Effect.fn(function* () {
         const repo = yield* seedGitRepo();
         const llm = yield* startMockLlmServer([
           {
@@ -197,8 +200,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("git init --gitignore merges generated rules and preserves custom entries", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "git init --gitignore merges generated rules and preserves custom entries",
+      Effect.fn(function* () {
         const repo = yield* seedGitRepo();
         yield* writeTextFile(repo, ".gitignore", "dist/\n\n# keep me\ncustom.cache\n");
 
@@ -246,8 +250,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("jj init full wizard writes scopes, gitignore, and default conventional hook", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "jj init full wizard writes scopes, gitignore, and default conventional hook",
+      Effect.fn(function* () {
         const repo = yield* seedJjRepo();
         const llm = yield* startMockLlmServer([
           {
@@ -276,9 +281,9 @@ describe.concurrent("CLI integration", () => {
         );
 
         expect(result.exitCode).toBe(0);
-        expect(result.stdout).toContain("init.generate-gitignore");
-        expect(result.stdout).toContain("init.generate-scopes");
-        expect(result.stdout).toContain("init.write-default-hook");
+        expect(result.stdout).toContain("Generate .gitignore");
+        expect(result.stdout).toContain("Generate scopes");
+        expect(result.stdout).toContain("Write default hook");
         expect(result.stdout).toContain(".gitignore updated: node");
         expect(result.stdout).toContain("scopes written");
 
@@ -292,8 +297,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("git commit fails without an API key before mutating the repository", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "git commit fails without an API key before mutating the repository",
+      Effect.fn(function* () {
         const repo = yield* seedGitRepo();
         yield* writeTextFile(repo, "api/routes.ts", "export const route = 'v2';\n");
 
@@ -307,8 +313,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("git commit fails safely when there are no changes", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "git commit fails safely when there are no changes",
+      Effect.fn(function* () {
         const repo = yield* seedGitRepo();
         const before = (yield* git(repo, ["rev-list", "--count", "HEAD"])).stdout.trim();
         const result = yield* runCli(
@@ -332,8 +339,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("git commit rejects invalid trailer syntax before creating any commit", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "git commit rejects invalid trailer syntax before creating any commit",
+      Effect.fn(function* () {
         const repo = yield* seedGitRepo();
         yield* writeTextFile(repo, "api/routes.ts", "export const route = 'v2';\n");
 
@@ -361,8 +369,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("git commit rejects --amend and --no-stage together", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "git commit rejects --amend and --no-stage together",
+      Effect.fn(function* () {
         const repo = yield* createGitRepo();
         const result = yield* runCli(
           [
@@ -384,8 +393,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("removed commit --all flag stays rejected", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "removed commit --all flag stays rejected",
+      Effect.fn(function* () {
         const repo = yield* createGitRepo();
         const result = yield* runCli(["commit", "--all"], { cwd: repo });
 
@@ -393,8 +403,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("removed add command stays rejected", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "removed add command stays rejected",
+      Effect.fn(function* () {
         const repo = yield* createGitRepo();
         const result = yield* runCli(["add", "somefile.txt"], { cwd: repo });
 
@@ -402,8 +413,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("git commit --dry-run plans and renders split commits from real file changes", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "git commit --dry-run plans and renders split commits from real file changes",
+      Effect.fn(function* () {
         const repo = yield* seedGitRepoWithScopes();
         yield* writeTextFile(repo, "api/routes.ts", "export const route = 'v2';\n");
         yield* writeTextFile(repo, "web/page.tsx", "export const page = 'dashboard';\n");
@@ -466,8 +478,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("git commit creates split commits that match the planner groups", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "git commit creates split commits that match the planner groups",
+      Effect.fn(function* () {
         const repo = yield* seedGitRepoWithScopes();
         yield* writeTextFile(repo, "api/routes.ts", "export const route = 'v2';\n");
         yield* writeTextFile(repo, "web/page.tsx", "export const page = 'dashboard';\n");
@@ -520,11 +533,11 @@ describe.concurrent("CLI integration", () => {
 
         expect(result.exitCode).toBe(0);
         expect(llm.remainingResponses()).toBe(0);
-        expect(result.stdout).toContain("commit.scan-changes");
-        expect(result.stdout).toContain("commit.plan-groups");
-        expect(result.stdout).toContain("commit.generate-message");
-        expect(result.stdout).toContain("group_index=1");
-        expect(result.stdout).toContain("commit.create");
+        expect(result.stdout).toContain("Scan changes");
+        expect(result.stdout).toContain("Plan commits");
+        expect(result.stdout).toContain("Generate commit message");
+        expect(result.stdout).toContain('group="1/2"');
+        expect(result.stdout).toContain("Create commit");
         expect(result.stdout).toContain("Created 2 commits.");
         expect(result.stdout).toContain("1. feat(api): update routes");
         expect(result.stdout).toContain("Files: api/routes.ts");
@@ -554,190 +567,191 @@ describe.concurrent("CLI integration", () => {
 
     it.effect(
       "git commit retries after conventional hook rejection and passes feedback to the next LLM call",
-      () =>
-        Effect.gen(function* () {
-          const repo = yield* createGitRepo();
-          yield* writeTextFile(
-            repo,
-            ".git-agent/config.yml",
-            "scopes:\n  - name: core\n    description: Shared application logic\nhook:\n  - conventional\n",
-          );
-          yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");
-          yield* writeTextFile(repo, "src/extra.ts", "export const extra = 'base';\n");
-          yield* gitCommitAll(repo, "chore: seed repo");
-          yield* writeTextFile(repo, "src/app.ts", "export const value = 'next';\n");
-          yield* writeTextFile(repo, "src/extra.ts", "export const extra = 'next';\n");
 
-          const firstTitle =
-            "feat(core): this title is intentionally far too long for the hook validation";
-          const llm = yield* startMockLlmServer([
-            {
-              content: {
-                groups: [
-                  {
-                    files: ["src/app.ts", "src/extra.ts"],
-                    title: "feat(core): update app value",
-                  },
-                ],
-              },
-            },
-            {
-              content: {
-                title: firstTitle,
-                bullets: ["Add updated app value"],
-                explanation: "Updates the app value in the working tree.",
-              },
-            },
-            {
-              content: {
-                title: "feat(core): update app value",
-                bullets: ["Add app value update"],
-                explanation: "Updates the app value in the working tree.",
-              },
-            },
-          ]);
+      Effect.fn(function* () {
+        const repo = yield* createGitRepo();
+        yield* writeTextFile(
+          repo,
+          ".git-agent/config.yml",
+          "scopes:\n  - name: core\n    description: Shared application logic\nhook:\n  - conventional\n",
+        );
+        yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");
+        yield* writeTextFile(repo, "src/extra.ts", "export const extra = 'base';\n");
+        yield* gitCommitAll(repo, "chore: seed repo");
+        yield* writeTextFile(repo, "src/app.ts", "export const value = 'next';\n");
+        yield* writeTextFile(repo, "src/extra.ts", "export const extra = 'next';\n");
 
-          const result = yield* runCli(
-            ["commit", "--api-key", "test-key", "--base-url", llm.baseUrl, "--model", "test-model"],
-            { cwd: repo },
-          );
+        const firstTitle =
+          "feat(core): this title is intentionally far too long for the hook validation";
+        const llm = yield* startMockLlmServer([
+          {
+            content: {
+              groups: [
+                {
+                  files: ["src/app.ts", "src/extra.ts"],
+                  title: "feat(core): update app value",
+                },
+              ],
+            },
+          },
+          {
+            content: {
+              title: firstTitle,
+              bullets: ["Add updated app value"],
+              explanation: "Updates the app value in the working tree.",
+            },
+          },
+          {
+            content: {
+              title: "feat(core): update app value",
+              bullets: ["Add app value update"],
+              explanation: "Updates the app value in the working tree.",
+            },
+          },
+        ]);
 
-          expect(result.exitCode).toBe(0);
-          expect(llm.requests).toHaveLength(3);
-          expect(llm.requests[2]?.systemPrompt).toContain("Fix the commit message");
-          expect(llm.requests[2]?.userPrompt).toContain("Fix the following commit message");
-          expect(llm.requests[2]?.userPrompt).toContain(firstTitle);
-          expect(llm.requests[2]?.userPrompt).toContain("title must be 50 characters or less");
-          expect((yield* git(repo, ["log", "-1", "--format=%s"])).stdout.trim()).toBe(
-            "feat(core): update app value",
-          );
-        }),
+        const result = yield* runCli(
+          ["commit", "--api-key", "test-key", "--base-url", llm.baseUrl, "--model", "test-model"],
+          { cwd: repo },
+        );
+
+        expect(result.exitCode).toBe(0);
+        expect(llm.requests).toHaveLength(3);
+        expect(llm.requests[2]?.systemPrompt).toContain("Fix the commit message");
+        expect(llm.requests[2]?.userPrompt).toContain("Fix the following commit message");
+        expect(llm.requests[2]?.userPrompt).toContain(firstTitle);
+        expect(llm.requests[2]?.userPrompt).toContain("title must be 50 characters or less");
+        expect((yield* git(repo, ["log", "-1", "--format=%s"])).stdout.trim()).toBe(
+          "feat(core): update app value",
+        );
+      }),
     );
 
     it.effect(
       "git commit exits with hook-blocked status after repeated conventional hook failures",
-      () =>
-        Effect.gen(function* () {
-          const repo = yield* createGitRepo();
-          yield* writeTextFile(
-            repo,
-            ".git-agent/config.yml",
-            "scopes:\n  - name: core\n    description: Shared application logic\nhook:\n  - conventional\n",
-          );
-          yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");
-          yield* writeTextFile(repo, "src/extra.ts", "export const extra = 'base';\n");
-          yield* gitCommitAll(repo, "chore: seed repo");
-          yield* writeTextFile(repo, "src/app.ts", "export const value = 'next';\n");
-          yield* writeTextFile(repo, "src/extra.ts", "export const extra = 'next';\n");
 
-          const badMessage = {
-            title: "feat(core): this title is still too long for the commit hook to accept",
-            bullets: ["Add updated app value"],
-            explanation: "Updates the app value in the working tree.",
-          };
-          const llm = yield* startMockLlmServer([
-            {
-              content: {
-                groups: [
-                  {
-                    files: ["src/app.ts", "src/extra.ts"],
-                    title: "feat(core): update app value",
-                  },
-                ],
-              },
-            },
-            { content: badMessage },
-            { content: badMessage },
-            { content: badMessage },
-            {
-              content: {
-                groups: [
-                  {
-                    files: ["src/app.ts", "src/extra.ts"],
-                    title: "feat(core): update app value",
-                  },
-                ],
-              },
-            },
-            { content: badMessage },
-            { content: badMessage },
-            { content: badMessage },
-            {
-              content: {
-                groups: [
-                  {
-                    files: ["src/app.ts", "src/extra.ts"],
-                    title: "feat(core): update app value",
-                  },
-                ],
-              },
-            },
-            { content: badMessage },
-            { content: badMessage },
-            { content: badMessage },
-          ]);
+      Effect.fn(function* () {
+        const repo = yield* createGitRepo();
+        yield* writeTextFile(
+          repo,
+          ".git-agent/config.yml",
+          "scopes:\n  - name: core\n    description: Shared application logic\nhook:\n  - conventional\n",
+        );
+        yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");
+        yield* writeTextFile(repo, "src/extra.ts", "export const extra = 'base';\n");
+        yield* gitCommitAll(repo, "chore: seed repo");
+        yield* writeTextFile(repo, "src/app.ts", "export const value = 'next';\n");
+        yield* writeTextFile(repo, "src/extra.ts", "export const extra = 'next';\n");
 
-          const result = yield* runCli(
-            ["commit", "--api-key", "test-key", "--base-url", llm.baseUrl, "--model", "test-model"],
-            { cwd: repo },
-          );
+        const badMessage = {
+          title: "feat(core): this title is still too long for the commit hook to accept",
+          bullets: ["Add updated app value"],
+          explanation: "Updates the app value in the working tree.",
+        };
+        const llm = yield* startMockLlmServer([
+          {
+            content: {
+              groups: [
+                {
+                  files: ["src/app.ts", "src/extra.ts"],
+                  title: "feat(core): update app value",
+                },
+              ],
+            },
+          },
+          { content: badMessage },
+          { content: badMessage },
+          { content: badMessage },
+          {
+            content: {
+              groups: [
+                {
+                  files: ["src/app.ts", "src/extra.ts"],
+                  title: "feat(core): update app value",
+                },
+              ],
+            },
+          },
+          { content: badMessage },
+          { content: badMessage },
+          { content: badMessage },
+          {
+            content: {
+              groups: [
+                {
+                  files: ["src/app.ts", "src/extra.ts"],
+                  title: "feat(core): update app value",
+                },
+              ],
+            },
+          },
+          { content: badMessage },
+          { content: badMessage },
+          { content: badMessage },
+        ]);
 
-          expect(result.exitCode).toBe(2);
-          expect(result.stderr).toContain("error: commit blocked after retries");
-          expect(result.stderr).toContain("hook rejected:");
-          expect(result.stderr).toContain("rejected message:");
-          expect(llm.requests).toHaveLength(12);
-          expect((yield* git(repo, ["log", "-1", "--format=%s"])).stdout.trim()).toBe(
-            "chore: seed repo",
-          );
-        }),
+        const result = yield* runCli(
+          ["commit", "--api-key", "test-key", "--base-url", llm.baseUrl, "--model", "test-model"],
+          { cwd: repo },
+        );
+
+        expect(result.exitCode).toBe(2);
+        expect(result.stderr).toContain("error: commit blocked after retries");
+        expect(result.stderr).toContain("hook rejected:");
+        expect(result.stderr).toContain("rejected message:");
+        expect(llm.requests).toHaveLength(12);
+        expect((yield* git(repo, ["log", "-1", "--format=%s"])).stdout.trim()).toBe(
+          "chore: seed repo",
+        );
+      }),
     );
 
     it.effect(
       "git commit --amend rewrites the last commit message without creating a new commit",
-      () =>
-        Effect.gen(function* () {
-          const repo = yield* createGitRepo();
-          yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");
-          yield* gitCommitAll(repo, "chore: seed repo");
-          yield* writeTextFile(repo, "src/app.ts", "export const value = 'next';\n");
-          yield* gitCommitAll(repo, "feat(core): old message");
 
-          const llm = yield* startMockLlmServer([
-            {
-              content: {
-                title: "fix(core): clarify app update",
-                bullets: ["Describe the updated app value"],
-                explanation: "Keeps the last commit but rewrites its message.",
-              },
+      Effect.fn(function* () {
+        const repo = yield* createGitRepo();
+        yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");
+        yield* gitCommitAll(repo, "chore: seed repo");
+        yield* writeTextFile(repo, "src/app.ts", "export const value = 'next';\n");
+        yield* gitCommitAll(repo, "feat(core): old message");
+
+        const llm = yield* startMockLlmServer([
+          {
+            content: {
+              title: "fix(core): clarify app update",
+              bullets: ["Describe the updated app value"],
+              explanation: "Keeps the last commit but rewrites its message.",
             },
-          ]);
+          },
+        ]);
 
-          const result = yield* runCli(
-            [
-              "commit",
-              "--amend",
-              "--api-key",
-              "test-key",
-              "--base-url",
-              llm.baseUrl,
-              "--model",
-              "test-model",
-            ],
-            { cwd: repo },
-          );
+        const result = yield* runCli(
+          [
+            "commit",
+            "--amend",
+            "--api-key",
+            "test-key",
+            "--base-url",
+            llm.baseUrl,
+            "--model",
+            "test-model",
+          ],
+          { cwd: repo },
+        );
 
-          expect(result.exitCode).toBe(0);
-          expect(llm.requests).toHaveLength(1);
-          expect((yield* git(repo, ["log", "-1", "--format=%s"])).stdout.trim()).toBe(
-            "fix(core): clarify app update",
-          );
-          expect((yield* git(repo, ["rev-list", "--count", "HEAD"])).stdout.trim()).toBe("2");
-        }),
+        expect(result.exitCode).toBe(0);
+        expect(llm.requests).toHaveLength(1);
+        expect((yield* git(repo, ["log", "-1", "--format=%s"])).stdout.trim()).toBe(
+          "fix(core): clarify app update",
+        );
+        expect((yield* git(repo, ["rev-list", "--count", "HEAD"])).stdout.trim()).toBe("2");
+      }),
     );
 
-    it.effect("jj commit --dry-run works against a temporary jj repo", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "jj commit --dry-run works against a temporary jj repo",
+      Effect.fn(function* () {
         const repo = yield* seedJjRepoWithScopes();
         yield* writeTextFile(repo, "src/app.ts", "export const value = 'after';\n");
 
@@ -786,8 +800,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("jj commit creates split commits and leaves an empty working copy", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "jj commit creates split commits and leaves an empty working copy",
+      Effect.fn(function* () {
         const repo = yield* seedJjRepoWithScopes();
         yield* writeTextFile(repo, "src/app.ts", "export const value = 'after';\n");
         yield* writeTextFile(repo, "src/feature.ts", "export const feature = false;\n");
@@ -840,11 +855,11 @@ describe.concurrent("CLI integration", () => {
 
         expect(result.exitCode).toBe(0);
         expect(llm.remainingResponses()).toBe(0);
-        expect(result.stdout).toContain("commit.scan-changes");
+        expect(result.stdout).toContain("Scan changes");
         expect(result.stdout).toContain('vcs="jj"');
-        expect(result.stdout).toContain("commit.plan-groups");
-        expect(result.stdout).toContain("commit.generate-message");
-        expect(result.stdout).toContain("commit.create");
+        expect(result.stdout).toContain("Plan commits");
+        expect(result.stdout).toContain("Generate commit message");
+        expect(result.stdout).toContain("Create commit");
         expect(result.stdout).toContain("Created 2 commits.");
         expect(result.stdout).toContain("1. fix(cli): refine app output");
         expect(result.stdout).toContain("Files: src/app.ts");
@@ -886,8 +901,56 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("jj commit --amend rewrites the previous jj change description", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "jj commit rejects planner output with overlapping files",
+      Effect.fn(function* () {
+        const repo = yield* seedJjRepoWithScopes();
+        yield* writeTextFile(repo, "src/app.ts", "export const value = 'after';\n");
+        yield* writeTextFile(repo, "src/feature.ts", "export const feature = false;\n");
+
+        const llm = yield* startMockLlmServer([
+          {
+            content: {
+              groups: [
+                {
+                  files: ["src/app.ts"],
+                  title: "fix(cli): refine app output",
+                },
+                {
+                  files: ["src/app.ts", "src/feature.ts"],
+                  title: "fix(core): adjust feature flag",
+                },
+              ],
+            },
+          },
+        ]);
+
+        const result = yield* runCli(
+          [
+            "commit",
+            "--vcs",
+            "jj",
+            "--dry-run",
+            "--api-key",
+            "test-key",
+            "--base-url",
+            llm.baseUrl,
+            "--model",
+            "test-model",
+          ],
+          { cwd: repo },
+        );
+
+        expect(result.exitCode).toBe(1);
+        expect(result.stderr).toContain("planner returned overlapping files for jj");
+        expect(result.stderr).toContain("src/app.ts");
+        expect(llm.requests).toHaveLength(1);
+      }),
+    );
+
+    it.effect(
+      "jj commit --amend rewrites the previous jj change description",
+      Effect.fn(function* () {
         const repo = yield* createJjRepo();
         yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");
         yield* jjCommitAll(repo, "chore: seed repo", ["src/app.ts"]);
@@ -940,8 +1003,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("jj commit retries after hook rejection and resubmits the previous message", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "jj commit retries after hook rejection and resubmits the previous message",
+      Effect.fn(function* () {
         const repo = yield* createJjRepo();
         yield* writeTextFile(
           repo,
@@ -1006,8 +1070,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("jj commit exits with hook-blocked status after repeated hook failures", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "jj commit exits with hook-blocked status after repeated hook failures",
+      Effect.fn(function* () {
         const repo = yield* createJjRepo();
         yield* writeTextFile(
           repo,
@@ -1070,8 +1135,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("jj commit fails safely when there are no changes", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "jj commit fails safely when there are no changes",
+      Effect.fn(function* () {
         const repo = yield* seedJjRepo();
         const before = trimmedLines(
           (yield* jj(repo, [
@@ -1115,8 +1181,9 @@ describe.concurrent("CLI integration", () => {
       }),
     );
 
-    it.effect("jj commit rejects --no-stage like the git implementation contract expects", () =>
-      Effect.gen(function* () {
+    it.effect(
+      "jj commit rejects --no-stage like the git implementation contract expects",
+      Effect.fn(function* () {
         const repo = yield* createJjRepo();
         const result = yield* runCli(
           [

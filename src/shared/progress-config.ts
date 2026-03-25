@@ -2,15 +2,18 @@ import type { ProgressAttributeDescriptor, ProgressRenderConfig } from "./tracin
 
 const hiddenAttributePrefixes = ["http.request.header.", "http.response.header."];
 
-const hiddenInteractiveAttributeKeys = new Set([
+const hiddenAttributeKeys = new Set([
   "concurrency",
   "gen_ai.openai.request.response_format",
   "gen_ai.openai.response.service_tier",
   "gen_ai.operation.name",
   "gen_ai.response.id",
   "gen_ai.system",
+  "http.request.method",
   "server.port",
+  "toolChoice",
   "url.full",
+  "url.scheme",
 ]);
 
 const orderedInteractiveAttributeKeys = [
@@ -27,7 +30,6 @@ const orderedInteractiveAttributeKeys = [
   "staged_files",
   "unstaged_files",
   "file_count",
-  "http.request.method",
   "url.path",
   "http.response.status_code",
   "server.address",
@@ -43,13 +45,86 @@ const interactiveLabelByKey: Record<string, string> = {
   unstaged_files: "unstaged",
   "gen_ai.request.model": "model",
   "gen_ai.response.model": "model",
-  "http.request.method": "method",
   "http.response.status_code": "status",
   "server.address": "server",
   "url.path": "path",
 };
 
-const toInteractiveDescriptors = (
+const friendlySpanNames: Record<string, string> = {
+  "commit.prepare-request": "Prepare commit",
+  "commit.run": "Run commit",
+  "commit.resolve-provider": "Resolve provider",
+  "commit.load-project-config": "Load project config",
+  "commit.scan-changes": "Scan changes",
+  "commit.plan-groups": "Plan commits",
+  "commit.refresh-scopes": "Refresh scopes",
+  "commit.replan-groups": "Replan commits",
+  "commit.generate-message": "Generate commit message",
+  "commit.run-hooks": "Run commit hooks",
+  "commit.create": "Create commit",
+  "commit.load-previous": "Load previous commit",
+  "commit.generate-amend-message": "Generate amended message",
+  "commit.amend": "Amend commit",
+  "init.run": "Run init",
+  "init.resolve-provider": "Resolve provider",
+  "init.initialize-repository": "Initialize repository",
+  "init.generate-gitignore": "Generate .gitignore",
+  "init.generate-scopes": "Generate scopes",
+  "init.write-default-hook": "Write default hook",
+  "init.write-hook": "Write hook config",
+  "init.write-project-config": "Write project config",
+  "config.resolve-provider": "Resolve provider config",
+  "config.resolve-field": "Resolve config value",
+  "hooks.execute": "Run hook",
+  "LanguageModel.generateText": "Call model",
+};
+
+const titleCase = (value: string): string =>
+  value
+    .split(/\s+/)
+    .filter((part) => part.length > 0)
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(" ");
+
+const formatFriendlySpanName = (name: string, attributes: ReadonlyMap<string, unknown>): string => {
+  const friendly = friendlySpanNames[name];
+  if (friendly != null) {
+    if (name === "hooks.execute") {
+      const hookType = attributes.get("hook_type");
+      return hookType === "conventional" ? "Validate conventional commit" : friendly;
+    }
+    return friendly;
+  }
+
+  if (name.startsWith("http.client")) {
+    const method = attributes.get("http.request.method");
+    return typeof method === "string" && method.length > 0 ? `HTTP ${method}` : "HTTP request";
+  }
+
+  return titleCase(name.replace(/[._-]+/g, " "));
+};
+
+const simplifyInteractiveLabel = (key: string): string => {
+  const mapped = interactiveLabelByKey[key];
+  if (mapped != null) {
+    return mapped;
+  }
+  if (key.startsWith("gen_ai.request.")) {
+    return key.slice("gen_ai.request.".length);
+  }
+  if (key.startsWith("gen_ai.response.")) {
+    return key.slice("gen_ai.response.".length);
+  }
+  if (key.startsWith("gen_ai.usage.")) {
+    return key.slice("gen_ai.usage.".length);
+  }
+  if (key.startsWith("gen_ai.")) {
+    return key.slice("gen_ai.".length);
+  }
+  return key;
+};
+
+const toDescriptors = (
   attributes: ReadonlyMap<string, unknown>,
 ): Array<ProgressAttributeDescriptor> => {
   const descriptors: Array<ProgressAttributeDescriptor> = [];
@@ -58,7 +133,7 @@ const toInteractiveDescriptors = (
   const push = (
     key: string,
     value: unknown,
-    label = interactiveLabelByKey[key] ?? key,
+    label = simplifyInteractiveLabel(key),
     dedupeKey?: string,
   ) => {
     if (value === undefined || value === null) {
@@ -119,7 +194,7 @@ const toInteractiveDescriptors = (
       if (used.has(key) || value === undefined || value === null) {
         return false;
       }
-      if (hiddenInteractiveAttributeKeys.has(key)) {
+      if (hiddenAttributeKeys.has(key)) {
         return false;
       }
       return hiddenAttributePrefixes.every((prefix) => !key.startsWith(prefix));
@@ -135,10 +210,10 @@ const toInteractiveDescriptors = (
 
 export const gitAgentProgressRenderConfig: ProgressRenderConfig = {
   headerLabel: "Git agent",
-  formatAttributes({ attributes }, { mode }) {
-    if (mode === "raw") {
-      return undefined;
-    }
-    return toInteractiveDescriptors(attributes);
+  formatSpanName(name, { span }) {
+    return formatFriendlySpanName(name, span.attributes);
+  },
+  formatAttributes({ attributes }) {
+    return toDescriptors(attributes);
   },
 };

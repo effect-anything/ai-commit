@@ -58,22 +58,20 @@ export const runProcess = ({
       } satisfies ProcessResult;
 
       if (result.exitCode !== 0 && !allowFailure) {
-        return yield* Effect.fail(
-          new ProcessExecutionError({
-            command: renderCommand(command, args),
-            exitCode: result.exitCode,
-            stdout: result.stdout,
-            stderr: result.stderr,
-          }),
-        );
+        return yield* new ProcessExecutionError({
+          command: renderCommand(command, args),
+          exitCode: result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr,
+        });
       }
 
       return result;
     }).pipe(
       Effect.catch((cause) =>
         cause instanceof ProcessExecutionError
-          ? Effect.fail(cause)
-          : Effect.fail(toProcessExecutionError(command, args, cause)),
+          ? Effect.failSync(() => cause)
+          : Effect.failSync(() => toProcessExecutionError(command, args, cause)),
       ),
     ),
   );

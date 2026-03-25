@@ -33,6 +33,10 @@ export class HookBlockedError extends Schema.TaggedErrorClass<HookBlockedError>(
   },
 ) {}
 
+export class CommitPlanError extends Schema.TaggedErrorClass<CommitPlanError>()("CommitPlanError", {
+  message: Schema.String,
+}) {}
+
 export class UnsupportedFeatureError extends Schema.TaggedErrorClass<UnsupportedFeatureError>()(
   "UnsupportedFeatureError",
   {
@@ -70,6 +74,9 @@ export const renderError = (error: unknown): string => {
       lines.push("", "rejected message:", "", error.lastMessage.trim());
     }
     return lines.join("\n");
+  }
+  if (error instanceof CommitPlanError) {
+    return error.message;
   }
   if (error instanceof UnsupportedFeatureError) {
     return error.message;
