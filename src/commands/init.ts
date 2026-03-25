@@ -72,9 +72,8 @@ const runInitCommandBody = Effect.fn(function* (input) {
   if (!input.force) {
     const exists = yield* fs.exists(configPath);
     if (exists) {
-      const existingPath = yield* projectConfigPath(repoRoot);
       return yield* new ConfigError({
-        message: `${existingPath} already exists\nhint: use --force to reinitialize`,
+        message: `${configPath} already exists\nhint: use --force to reinitialize`,
       });
     }
   }

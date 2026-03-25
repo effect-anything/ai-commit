@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { ConfigProvider, Effect, Layer } from "effect";
-import { Command } from "effect/unstable/cli";
+import { CliError, Command } from "effect/unstable/cli";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import PackageJson from "../package.json" with { type: "json" };
 import { commandRoot } from "./commands/root";
@@ -23,6 +23,11 @@ const program = Command.run(commandRoot, {
   Effect.provide(Live),
   Effect.catch((error) =>
     Effect.sync(() => {
+      if (CliError.isCliError(error) && error._tag === "ShowHelp") {
+        process.exitCode = error.errors.length > 0 ? 1 : 0;
+        return;
+      }
+
       console.error(renderError(error));
       process.exitCode =
         error != null &&
