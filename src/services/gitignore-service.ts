@@ -115,7 +115,7 @@ const fetchGitignore = Effect.fn(function* (technologies: ReadonlyArray<string>)
       return text;
     },
     catch: (cause) =>
-      cause instanceof ApiError
+      ApiError.is(cause)
         ? cause
         : new ApiError({
             message: cause instanceof Error ? cause.message : String(cause),

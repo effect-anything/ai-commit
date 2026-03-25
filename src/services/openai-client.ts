@@ -14,6 +14,24 @@ export interface ProviderConfig {
   readonly model: string;
 }
 
+const llmInvalidOutputRetrySchedule = Schedule.either(
+  Schedule.exponential("300 millis"),
+  Schedule.spaced("1 second"),
+).pipe(
+  Schedule.jittered,
+  Schedule.take(2),
+  Schedule.delays,
+  Schedule.tapOutput((delay) =>
+    Effect.gen(function* () {
+      const retryAt = DateTime.addDuration(yield* DateTime.now, delay);
+      yield* Effect.annotateCurrentSpan({
+        retry_delay: Duration.format(delay).replace(/\s+\d+ns$/, ""),
+        retry_at: DateTime.formatIso(retryAt),
+      });
+    }),
+  ),
+);
+
 const llmTransientRetrySchedule = Schedule.either(
   Schedule.exponential("250 millis"),
   Schedule.spaced("2 seconds"),
@@ -86,7 +104,7 @@ const callLlm = (config: ProviderConfig, system: string, user: string, maxTokens
     ),
     Effect.provide(makeLanguageModelLayer(config, maxTokens)),
     Effect.catch((cause) =>
-      cause instanceof ApiError
+      ApiError.is(cause)
         ? Effect.failSync(() => cause)
         : Effect.failSync(
             () =>
@@ -125,19 +143,29 @@ const detectTechSystemPrompt =
 const generateScopesSystemPrompt =
   'You are an expert software engineer. Derive commit scopes from the top-level directories of the project, using commit history to validate and refine them. Respond ONLY with valid JSON: {"scopes": [{"name": "...", "description": "..."}], "reasoning": "..."}. Scope names must be short, lowercase, and must not be commit types.';
 
-const parseJson = <A>(raw: string, wrapKey?: string): A => {
+const isRetryableInvalidModelOutput = (error: ApiError): boolean =>
+  error.message.startsWith("failed to parse model JSON:") ||
+  error.message.startsWith("LLM returned empty ");
+
+const parseJson = <A>(raw: string, wrapKey?: string): Effect.Effect<A, ApiError> => {
   const cleaned = extractJson(raw);
-  try {
-    return JSON.parse(cleaned) as A;
-  } catch (error) {
-    if (wrapKey != null && cleaned.startsWith("[")) {
-      return JSON.parse(`{"${wrapKey}":${cleaned}}`) as A;
-    }
-    throw new ApiError({
-      message: `failed to parse model JSON: ${error instanceof Error ? error.message : String(error)}`,
-      body: cleaned,
-    });
-  }
+  return Effect.try({
+    try: () => {
+      try {
+        return JSON.parse(cleaned) as A;
+      } catch (error) {
+        if (wrapKey != null && cleaned.startsWith("[")) {
+          return JSON.parse(`{"${wrapKey}":${cleaned}}`) as A;
+        }
+        throw error;
+      }
+    },
+    catch: (error) =>
+      new ApiError({
+        message: `failed to parse model JSON: ${error instanceof Error ? error.message : String(error)}`,
+        body: cleaned,
+      }),
+  });
 };
 
 export interface GenerateCommitMessageInput {
@@ -191,27 +219,38 @@ export const generateCommitMessage = Effect.fn(function* ({
     }
   }
 
-  const raw = yield* callLlm(provider, systemPrompt, promptParts.join("\n\n"), 4096);
-  const parsed = parseJson<{ title?: string; bullets?: Array<string>; explanation?: string }>(raw);
+  return yield* Effect.gen(function* () {
+    const raw = yield* callLlm(provider, systemPrompt, promptParts.join("\n\n"), 4096);
+    const parsed = yield* parseJson<{
+      title?: string;
+      bullets?: Array<string>;
+      explanation?: string;
+    }>(raw);
 
-  if (typeof parsed.title !== "string" || parsed.title.trim().length === 0) {
-    return yield* new ApiError({
-      message: "LLM returned empty commit message",
-      body: raw,
-    });
-  }
+    if (typeof parsed.title !== "string" || parsed.title.trim().length === 0) {
+      return yield* new ApiError({
+        message: "LLM returned empty commit message",
+        body: raw,
+      });
+    }
 
-  return {
-    title: parsed.title.trim(),
-    bullets: Array.isArray(parsed.bullets)
-      ? parsed.bullets.filter(
-          (item): item is string => typeof item === "string" && item.trim().length > 0,
-        )
-      : [],
-    explanation: wrapExplanation(
-      typeof parsed.explanation === "string" ? parsed.explanation.trim() : "",
-    ),
-  } satisfies CommitMessage;
+    return {
+      title: parsed.title.trim(),
+      bullets: Array.isArray(parsed.bullets)
+        ? parsed.bullets.filter(
+            (item): item is string => typeof item === "string" && item.trim().length > 0,
+          )
+        : [],
+      explanation: wrapExplanation(
+        typeof parsed.explanation === "string" ? parsed.explanation.trim() : "",
+      ),
+    } satisfies CommitMessage;
+  }).pipe(
+    Effect.retry({
+      while: (error) => ApiError.is(error) && isRetryableInvalidModelOutput(error),
+      schedule: llmInvalidOutputRetrySchedule,
+    }),
+  );
 });
 
 export interface PlanCommitsInput {
@@ -248,55 +287,62 @@ export const planCommits = Effect.fn(function* ({
     promptParts.push(`Unstaged files:\n${unstagedFiles.join("\n")}`);
   }
 
-  const raw = yield* callLlm(
-    provider,
-    hasScopes ? planSystemPromptScoped : planSystemPrompt,
-    promptParts.join("\n\n"),
-    8192,
+  return yield* Effect.gen(function* () {
+    const raw = yield* callLlm(
+      provider,
+      hasScopes ? planSystemPromptScoped : planSystemPrompt,
+      promptParts.join("\n\n"),
+      8192,
+    );
+
+    const parsed = yield* parseJson<{
+      groups?: Array<{
+        files?: Array<string>;
+        title?: string;
+        bullets?: Array<string>;
+        explanation?: string;
+      }>;
+    }>(raw, "groups");
+
+    const groups =
+      parsed.groups?.map((group) => ({
+        files: Array.isArray(group.files)
+          ? group.files.filter(
+              (item): item is string => typeof item === "string" && item.trim().length > 0,
+            )
+          : [],
+        message:
+          typeof group.title === "string" && group.title.trim().length > 0
+            ? {
+                title: group.title.trim(),
+                bullets: Array.isArray(group.bullets)
+                  ? group.bullets.filter(
+                      (item): item is string => typeof item === "string" && item.trim().length > 0,
+                    )
+                  : [],
+                explanation: wrapExplanation(
+                  typeof group.explanation === "string" ? group.explanation.trim() : "",
+                ),
+              }
+            : undefined,
+      })) ?? [];
+
+    if (groups.length === 0) {
+      return yield* new ApiError({
+        message: "LLM returned empty plan",
+        body: raw,
+      });
+    }
+
+    return {
+      groups,
+    } satisfies CommitPlan;
+  }).pipe(
+    Effect.retry({
+      while: (error) => ApiError.is(error) && isRetryableInvalidModelOutput(error),
+      schedule: llmInvalidOutputRetrySchedule,
+    }),
   );
-
-  const parsed = parseJson<{
-    groups?: Array<{
-      files?: Array<string>;
-      title?: string;
-      bullets?: Array<string>;
-      explanation?: string;
-    }>;
-  }>(raw, "groups");
-
-  const groups =
-    parsed.groups?.map((group) => ({
-      files: Array.isArray(group.files)
-        ? group.files.filter(
-            (item): item is string => typeof item === "string" && item.trim().length > 0,
-          )
-        : [],
-      message:
-        typeof group.title === "string" && group.title.trim().length > 0
-          ? {
-              title: group.title.trim(),
-              bullets: Array.isArray(group.bullets)
-                ? group.bullets.filter(
-                    (item): item is string => typeof item === "string" && item.trim().length > 0,
-                  )
-                : [],
-              explanation: wrapExplanation(
-                typeof group.explanation === "string" ? group.explanation.trim() : "",
-              ),
-            }
-          : undefined,
-    })) ?? [];
-
-  if (groups.length === 0) {
-    return yield* new ApiError({
-      message: "LLM returned empty plan",
-      body: raw,
-    });
-  }
-
-  return {
-    groups,
-  } satisfies CommitPlan;
 });
 
 export const detectTechnologies = Effect.fn(function* (
@@ -305,24 +351,31 @@ export const detectTechnologies = Effect.fn(function* (
   dirs: ReadonlyArray<string>,
   files: ReadonlyArray<string>,
 ) {
-  const raw = yield* callLlm(
-    provider,
-    detectTechSystemPrompt,
-    `OS: ${osName}\n\nTop-level directories:\n${dirs.join("\n")}\n\nTracked files:\n${files.join("\n")}`,
-    1024,
+  return yield* Effect.gen(function* () {
+    const raw = yield* callLlm(
+      provider,
+      detectTechSystemPrompt,
+      `OS: ${osName}\n\nTop-level directories:\n${dirs.join("\n")}\n\nTracked files:\n${files.join("\n")}`,
+      1024,
+    );
+    const parsed = yield* parseJson<{ technologies?: Array<string> }>(raw, "technologies");
+    const technologies =
+      parsed.technologies?.filter(
+        (item): item is string => typeof item === "string" && item.trim().length > 0,
+      ) ?? [];
+    if (technologies.length === 0) {
+      return yield* new ApiError({
+        message: "LLM returned empty technologies",
+        body: raw,
+      });
+    }
+    return technologies;
+  }).pipe(
+    Effect.retry({
+      while: (error) => ApiError.is(error) && isRetryableInvalidModelOutput(error),
+      schedule: llmInvalidOutputRetrySchedule,
+    }),
   );
-  const parsed = parseJson<{ technologies?: Array<string> }>(raw, "technologies");
-  const technologies =
-    parsed.technologies?.filter(
-      (item): item is string => typeof item === "string" && item.trim().length > 0,
-    ) ?? [];
-  if (technologies.length === 0) {
-    return yield* new ApiError({
-      message: "LLM returned empty technologies",
-      body: raw,
-    });
-  }
-  return technologies;
 });
 
 export const generateScopes = Effect.fn(function* (
@@ -331,31 +384,38 @@ export const generateScopes = Effect.fn(function* (
   dirs: ReadonlyArray<string>,
   files: ReadonlyArray<string>,
 ) {
-  const raw = yield* callLlm(
-    provider,
-    generateScopesSystemPrompt,
-    `Commit log (subject + changed files):\n${commits.join("\n---\n")}\n\nTop-level directories:\n${dirs.join("\n")}\n\nTracked files:\n${files.join("\n")}`,
-    8192,
+  return yield* Effect.gen(function* () {
+    const raw = yield* callLlm(
+      provider,
+      generateScopesSystemPrompt,
+      `Commit log (subject + changed files):\n${commits.join("\n---\n")}\n\nTop-level directories:\n${dirs.join("\n")}\n\nTracked files:\n${files.join("\n")}`,
+      8192,
+    );
+    const parsed = yield* parseJson<{ scopes?: Array<ProjectScope> }>(raw, "scopes");
+    const scopes =
+      parsed.scopes?.filter(
+        (scope): scope is ProjectScope =>
+          typeof scope === "object" &&
+          scope != null &&
+          typeof scope.name === "string" &&
+          scope.name.trim().length > 0,
+      ) ?? [];
+    if (scopes.length === 0) {
+      return yield* new ApiError({
+        message: "LLM returned empty scopes",
+        body: raw,
+      });
+    }
+    return scopes.map((scope) => ({
+      name: scope.name.trim(),
+      ...(typeof scope.description === "string" && scope.description.trim().length > 0
+        ? { description: scope.description.trim() }
+        : {}),
+    }));
+  }).pipe(
+    Effect.retry({
+      while: (error) => ApiError.is(error) && isRetryableInvalidModelOutput(error),
+      schedule: llmInvalidOutputRetrySchedule,
+    }),
   );
-  const parsed = parseJson<{ scopes?: Array<ProjectScope> }>(raw, "scopes");
-  const scopes =
-    parsed.scopes?.filter(
-      (scope): scope is ProjectScope =>
-        typeof scope === "object" &&
-        scope != null &&
-        typeof scope.name === "string" &&
-        scope.name.trim().length > 0,
-    ) ?? [];
-  if (scopes.length === 0) {
-    return yield* new ApiError({
-      message: "LLM returned empty scopes",
-      body: raw,
-    });
-  }
-  return scopes.map((scope) => ({
-    name: scope.name.trim(),
-    ...(typeof scope.description === "string" && scope.description.trim().length > 0
-      ? { description: scope.description.trim() }
-      : {}),
-  }));
 });

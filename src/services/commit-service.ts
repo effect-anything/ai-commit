@@ -238,7 +238,9 @@ class RetryableHookRejectionError extends Schema.TaggedErrorClass<RetryableHookR
     reason: Schema.String,
     lastMessage: Schema.String,
   },
-) {}
+) {
+  static is = Schema.is(this);
+}
 
 interface AcceptedCommitMessageResult {
   readonly _tag: "Accepted";
@@ -253,7 +255,7 @@ interface RejectedCommitMessageResult {
 }
 
 const isRetryableHookRejection = (error: unknown): error is RetryableHookRejectionError =>
-  error instanceof RetryableHookRejectionError;
+  RetryableHookRejectionError.is(error);
 
 const generateCommitMessageWithHooks = Effect.fn(function* (
   request: CommitRequest,
