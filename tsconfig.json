@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "outDir": "./dist",
+    "lib": ["ESNext"],
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "allowJs": false,
+    "types": ["bun"],
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "exactOptionalPropertyTypes": true,
+    "isolatedModules": true,
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "effectFn": ["span"],
+        "diagnosticSeverity": {
+          "effectSucceedWithVoid": "off",
+          "schemaStructWithTag": "error",
+          "schemaUnionOfLiterals": "error",
+          "serviceNotAsClass": "error",
+          "unnecessaryPipe": "error"
+        }
+      }
+    ]
+  },
+  "include": ["./src", "./tests", "./package.json", "./tsdown.config.ts"],
+  "exclude": ["dist", "node_modules"]
+}

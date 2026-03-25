@@ -1,0 +1,62 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": null,
+  "categories": {},
+  "overrides": [
+    {
+      "files": ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx", "**/test/**"],
+      "plugins": ["vitest"],
+      "rules": {
+        "vitest/consistent-each-for": "warn",
+        "vitest/hoisted-apis-on-top": "warn",
+        "vitest/no-conditional-tests": "warn",
+        "vitest/require-local-test-context-for-concurrent-snapshots": "warn"
+      }
+    }
+  ],
+  "rules": {
+    "import/namespace": "off",
+    "import/no-unassigned-import": "off",
+    "require-yield": "off"
+  },
+  "settings": {
+    "jsx-a11y": {
+      "polymorphicPropName": null,
+      "components": {},
+      "attributes": {}
+    },
+    "react": {
+      "formComponents": [],
+      "linkComponents": [],
+      "version": null,
+      "componentWrapperFunctions": []
+    },
+    "jsdoc": {
+      "ignorePrivate": false,
+      "ignoreInternal": false,
+      "ignoreReplacesDocs": true,
+      "overrideReplacesDocs": true,
+      "augmentsExtendsReplacesDocs": false,
+      "implementsReplacesDocs": false,
+      "exemptDestructuredRootsFromChecks": false,
+      "tagNamePreference": {}
+    },
+    "vitest": {
+      "typecheck": false
+    }
+  },
+  "env": {
+    "builtin": true
+  },
+  "globals": {},
+  "ignorePatterns": [
+    ".repo/**",
+    ".direnv/**",
+    ".lalph/**",
+    ".codemogger/**",
+    ".specs/**",
+    ".jj/**",
+    "dist/**",
+    "node_modules/**"
+  ]
+}
