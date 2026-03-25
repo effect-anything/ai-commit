@@ -52,7 +52,6 @@ const outputResolvedProvider = Effect.fn(function* (
         vcs,
         free,
       },
-      captureStackTrace: false,
     },
   );
   const build = yield* readBuildProviderDefaults;
@@ -115,7 +114,6 @@ const configGet = Command.make(
         vcs: vcsKind,
         in_repo: isRepo,
       },
-      captureStackTrace: false,
     });
     if (resolved == null) {
       yield* Console.log(`${key} is not set`);

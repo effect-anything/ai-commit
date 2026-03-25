@@ -49,7 +49,6 @@ const runInitCommandBody = Effect.fn(function* (input) {
       attributes: {
         vcs: vcsKind,
       },
-      captureStackTrace: false,
     });
     if (output.length > 0) {
       yield* Console.log(output);
@@ -96,7 +95,6 @@ const runInitCommandBody = Effect.fn(function* (input) {
         vcs: vcsKind,
         free: input.free,
       },
-      captureStackTrace: false,
     },
   );
 
@@ -116,7 +114,6 @@ const runInitCommandBody = Effect.fn(function* (input) {
           vcs: vcsKind,
           full_wizard: fullWizard,
         },
-        captureStackTrace: false,
       },
     );
     yield* Console.log(`.gitignore updated: ${techs.join(", ")}`);
@@ -132,7 +129,6 @@ const runInitCommandBody = Effect.fn(function* (input) {
           full_wizard: fullWizard,
           max_commits: input.maxCommits,
         },
-        captureStackTrace: false,
       },
     );
     yield* mergeAndSaveScopes(configPath, scopes);
@@ -147,7 +143,6 @@ const runInitCommandBody = Effect.fn(function* (input) {
         attributes: {
           path: configPath,
         },
-        captureStackTrace: false,
       },
     );
   } else if (hooks.length > 0) {
@@ -159,7 +154,6 @@ const runInitCommandBody = Effect.fn(function* (input) {
           path: configPath,
           hook_count: hooks.length,
         },
-        captureStackTrace: false,
       },
     );
   }
@@ -172,7 +166,6 @@ const runInitCommandBody = Effect.fn(function* (input) {
         attributes: {
           path: configPath,
         },
-        captureStackTrace: false,
       },
     );
   }
@@ -187,7 +180,6 @@ const runInitCommand = (input: Parameters<typeof runInitCommandBody>[0]) =>
       requested_vcs: toOptionalString(input.vcs) ?? "auto",
       scope: input.scope,
     },
-    captureStackTrace: false,
   });
 
 export const commandInit = Command.make(
