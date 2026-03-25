@@ -30,6 +30,22 @@ describe.concurrent("Vcs", () => {
           expect(files).not.toContain("packages/tmp/generated.ts");
         }),
       );
+
+      it.effect("jj filesystem scan keeps traversing directories with negated descendants", () =>
+        Effect.gen(function* () {
+          const repo = yield* createJjRepo();
+          yield* writeTextFile(repo, ".gitignore", "dist/*\n!dist/keep/\n!dist/keep/**\n");
+          yield* writeTextFile(repo, "dist/drop/out.js", "export const drop = true;\n");
+          yield* writeTextFile(repo, "dist/keep/in.js", "export const keep = true;\n");
+
+          const vcsService = yield* Vcs;
+          const { client } = yield* vcsService.resolve(repo, "jj");
+          const files = yield* client.projectFiles(repo);
+
+          expect(files).toContain("dist/keep/in.js");
+          expect(files).not.toContain("dist/drop/out.js");
+        }),
+      );
     },
   );
 });

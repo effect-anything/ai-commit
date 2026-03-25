@@ -19,6 +19,12 @@ interface IgnoreRules {
   readonly relativePaths: ReadonlySet<string>;
 }
 
+interface ScanState {
+  readonly root: string;
+  readonly ignoreRules: IgnoreRules;
+  readonly useGitCheckIgnore: boolean;
+}
+
 const internalDirectoryNames = new Set([".git", ".jj"]);
 
 const emptyDiff = (): VcsDiff => ({
@@ -108,6 +114,21 @@ const shouldSkipDir = (name: string, relativePath: string, ignoreRules: IgnoreRu
   internalDirectoryNames.has(name) ||
   ignoreRules.directoryNames.has(name) ||
   ignoreRules.relativePaths.has(toPortablePath(relativePath));
+
+const ignoredPathsByFallback = (
+  relativePaths: ReadonlyArray<string>,
+  ignoreRules: IgnoreRules,
+): Set<string> => {
+  const ignored = new Set<string>();
+  for (const relativePath of relativePaths) {
+    const normalized = toPortablePath(relativePath);
+    const name = normalized.split("/").at(-1) ?? normalized;
+    if (shouldSkipDir(name, normalized, ignoreRules)) {
+      ignored.add(normalized);
+    }
+  }
+  return ignored;
+};
 
 const makeRunProcess =
   (spawner: ChildProcessSpawner["Service"]) =>
@@ -219,22 +240,63 @@ export const GitClientLive = Layer.effect(
       } satisfies IgnoreRules;
     });
 
-    const listTopLevelDirs = Effect.fn(function* (root: string) {
-      const ignoreRules = yield* loadIgnoreRules(root);
-      const entries = yield* fs
-        .readDirectory(root)
-        .pipe(Effect.mapError((cause) => processError("readDirectory", cause)));
-      const dirs = yield* Effect.filter(entries, (entry) => {
-        if (entry.startsWith(".") || shouldSkipDir(entry, entry, ignoreRules)) {
-          return Effect.succeed(false);
-        }
-        return fs.stat(path.join(root, entry)).pipe(
-          Effect.map((info) => info.type === "Directory"),
-          Effect.catch(() => Effect.succeed(false)),
-        );
+    const ignoredPaths = Effect.fn(function* (
+      state: ScanState,
+      relativePaths: ReadonlyArray<string>,
+    ) {
+      if (relativePaths.length === 0) {
+        return new Set<string>();
+      }
+      const fallbackIgnored = ignoredPathsByFallback(relativePaths, state.ignoreRules);
+      if (!state.useGitCheckIgnore) {
+        return fallbackIgnored;
+      }
+
+      const input = relativePaths.map(toPortablePath).join("\n");
+      const result = yield* run({
+        command: "git",
+        args: ["check-ignore", "--stdin"],
+        cwd: state.root,
+        stdin: input.length > 0 ? `${input}\n` : "",
+        allowFailure: true,
       });
-      return dirs.sort();
+
+      if (result.exitCode === 0 || result.exitCode === 1) {
+        return new Set([...fallbackIgnored, ...normalizeLines(result.stdout).map(toPortablePath)]);
+      }
+
+      return fallbackIgnored;
     });
+
+    const buildScanState = Effect.fn(function* (root: string) {
+      const ignoreRules = yield* loadIgnoreRules(root);
+      return {
+        root,
+        ignoreRules,
+        useGitCheckIgnore: true,
+      } satisfies ScanState;
+    });
+
+    const listTopLevelDirs: (root: string) => Effect.Effect<Array<string>, ProcessExecutionError> =
+      Effect.fn(function* (root: string) {
+        const state = yield* buildScanState(root);
+        const entries = yield* fs
+          .readDirectory(root)
+          .pipe(Effect.mapError((cause) => processError("readDirectory", cause)));
+        const maybeDirectoryEntries: Array<string | undefined> = yield* Effect.forEach(
+          entries,
+          (entry) =>
+            fs.stat(path.join(root, entry)).pipe(
+              Effect.map((info) => (info.type === "Directory" ? entry : undefined)),
+              Effect.catch(() => Effect.succeed(undefined)),
+            ),
+        );
+        const directoryEntries = maybeDirectoryEntries.filter(
+          (entry): entry is string => entry != null,
+        );
+        const ignored = yield* ignoredPaths(state, directoryEntries);
+        return directoryEntries.filter((entry) => !ignored.has(toPortablePath(entry))).sort();
+      });
 
     const readGitLog = Effect.fn(function* (cwd: string, max: number) {
       const result = yield* run({
@@ -500,64 +562,108 @@ export const JjClientLive = Layer.effect(
       } satisfies IgnoreRules;
     });
 
+    const ignoredPaths = Effect.fn(function* (
+      state: ScanState,
+      relativePaths: ReadonlyArray<string>,
+    ) {
+      if (relativePaths.length === 0) {
+        return new Set<string>();
+      }
+      const fallbackIgnored = ignoredPathsByFallback(relativePaths, state.ignoreRules);
+      if (!state.useGitCheckIgnore) {
+        return fallbackIgnored;
+      }
+
+      const input = relativePaths.map(toPortablePath).join("\n");
+      const result = yield* run({
+        command: "git",
+        args: ["check-ignore", "--stdin"],
+        cwd: state.root,
+        stdin: input.length > 0 ? `${input}\n` : "",
+        allowFailure: true,
+      });
+
+      if (result.exitCode === 0 || result.exitCode === 1) {
+        return new Set([...fallbackIgnored, ...normalizeLines(result.stdout).map(toPortablePath)]);
+      }
+
+      return fallbackIgnored;
+    });
+
+    const buildScanState = Effect.fn(function* (root: string) {
+      const ignoreRules = yield* loadIgnoreRules(root);
+      const useGitCheckIgnore = yield* fs
+        .exists(path.join(root, ".git"))
+        .pipe(Effect.mapError((cause) => processError("readIgnoreRules", cause)));
+      return {
+        root,
+        ignoreRules,
+        useGitCheckIgnore,
+      } satisfies ScanState;
+    });
+
     const walkFiles: (
-      root: string,
-      ignoreRules: IgnoreRules,
+      state: ScanState,
       cwd?: string,
     ) => Effect.Effect<Array<string>, ProcessExecutionError> = Effect.fn(function* (
-      root: string,
-      ignoreRules: IgnoreRules,
-      cwd = root,
+      state: ScanState,
+      cwd = state.root,
     ) {
       const entries = yield* fs
         .readDirectory(cwd)
         .pipe(Effect.mapError((cause) => processError("walkFiles", cause)));
-      const nested: Array<Array<string>> = yield* Effect.forEach(entries, (entry) =>
+      const scanned = yield* Effect.forEach(entries, (entry) =>
         Effect.gen(function* () {
-          if (entry.startsWith(".") && ![".gitignore", ".env.example", ".envrc"].includes(entry)) {
-            const hiddenPath = path.join(cwd, entry);
-            const hiddenInfo = yield* fs
-              .stat(hiddenPath)
-              .pipe(Effect.mapError((cause) => processError("walkFiles", cause)));
-            if (hiddenInfo.type === "Directory") {
-              return [] as Array<string>;
-            }
-          }
-
           const fullPath = path.join(cwd, entry);
           const info = yield* fs
             .stat(fullPath)
             .pipe(Effect.mapError((cause) => processError("walkFiles", cause)));
-
-          if (info.type === "Directory") {
-            if (shouldSkipDir(entry, path.relative(root, fullPath), ignoreRules)) {
-              return [] as Array<string>;
-            }
-            return yield* walkFiles(root, ignoreRules, fullPath);
+          return {
+            entry,
+            fullPath,
+            relativePath: toPortablePath(path.relative(state.root, fullPath)),
+            info,
+          };
+        }),
+      );
+      const ignored = yield* ignoredPaths(
+        state,
+        scanned.map((item) => item.relativePath),
+      );
+      const nested: Array<Array<string>> = yield* Effect.forEach(scanned, (item) =>
+        Effect.gen(function* () {
+          if (ignored.has(item.relativePath)) {
+            return [] as Array<string>;
           }
-
-          return [path.relative(root, fullPath)];
+          if (item.info.type === "Directory") {
+            return yield* walkFiles(state, item.fullPath);
+          }
+          return [item.relativePath];
         }),
       );
       return nested.flat().sort();
     });
 
-    const listTopLevelDirs = Effect.fn(function* (root: string) {
-      const ignoreRules = yield* loadIgnoreRules(root);
-      const entries = yield* fs
-        .readDirectory(root)
-        .pipe(Effect.mapError((cause) => processError("readDirectory", cause)));
-      const dirs = yield* Effect.filter(entries, (entry) => {
-        if (entry.startsWith(".") || shouldSkipDir(entry, entry, ignoreRules)) {
-          return Effect.succeed(false);
-        }
-        return fs.stat(path.join(root, entry)).pipe(
-          Effect.map((info) => info.type === "Directory"),
-          Effect.catch(() => Effect.succeed(false)),
+    const listTopLevelDirs: (root: string) => Effect.Effect<Array<string>, ProcessExecutionError> =
+      Effect.fn(function* (root: string) {
+        const state = yield* buildScanState(root);
+        const entries = yield* fs
+          .readDirectory(root)
+          .pipe(Effect.mapError((cause) => processError("readDirectory", cause)));
+        const maybeDirectoryEntries: Array<string | undefined> = yield* Effect.forEach(
+          entries,
+          (entry) =>
+            fs.stat(path.join(root, entry)).pipe(
+              Effect.map((info) => (info.type === "Directory" ? entry : undefined)),
+              Effect.catch(() => Effect.succeed(undefined)),
+            ),
         );
+        const directoryEntries = maybeDirectoryEntries.filter(
+          (entry): entry is string => entry != null,
+        );
+        const ignored = yield* ignoredPaths(state, directoryEntries);
+        return directoryEntries.filter((entry) => !ignored.has(toPortablePath(entry))).sort();
       });
-      return dirs.sort();
-    });
 
     const readGitLog = Effect.fn(function* (cwd: string, max: number) {
       const result = yield* run({
@@ -732,8 +838,8 @@ export const JjClientLive = Layer.effect(
       topLevelDirs: (cwd) => Effect.flatMap(repoRoot(cwd), listTopLevelDirs),
       projectFiles: Effect.fn(function* (cwd: string) {
         const root = yield* repoRoot(cwd);
-        const ignoreRules = yield* loadIgnoreRules(root);
-        const files = yield* walkFiles(root, ignoreRules);
+        const state = yield* buildScanState(root);
+        const files = yield* walkFiles(state);
         return files.slice(0, 300);
       }),
     } satisfies VcsClient;
