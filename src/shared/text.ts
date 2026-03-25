@@ -4,7 +4,7 @@ export const countLines = (content: string): number => {
   if (content.length === 0) {
     return 0;
   }
-  return content.split("\n").length - 1;
+  return content.endsWith("\n") ? content.split("\n").length - 1 : content.split("\n").length;
 };
 
 export const wrapLongLine = (line: string, width: number): Array<string> => {
@@ -33,7 +33,7 @@ export const wrapLongLine = (line: string, width: number): Array<string> => {
 export const wrapExplanation = (text: string, width = 72): string =>
   text
     .split("\n")
-    .flatMap((line) => (line.length <= 100 ? [line] : wrapLongLine(line, width)))
+    .flatMap((line) => (line.length <= width ? [line] : wrapLongLine(line, width)))
     .join("\n");
 
 export const extractJson = (input: string): string => {
