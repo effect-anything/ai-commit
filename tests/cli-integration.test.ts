@@ -479,6 +479,53 @@ describe.concurrent("CLI integration", () => {
     );
 
     it.effect(
+      "git commit --dry-run does not persist auto-generated scopes",
+      Effect.fn(function* () {
+        const repo = yield* seedGitRepo();
+        yield* writeTextFile(repo, "api/routes.ts", "export const route = 'v2';\n");
+
+        const llm = yield* startMockLlmServer([
+          {
+            content: {
+              scopes: [{ name: "api", description: "Backend API handlers" }],
+            },
+          },
+          {
+            content: {
+              scopes: [{ name: "api", description: "Backend API handlers" }],
+            },
+          },
+          {
+            content: {
+              title: "feat(api): update routes",
+              bullets: ["Adjust API routing output"],
+              explanation: "Updates the API route response shape.",
+            },
+          },
+        ]);
+
+        const result = yield* runCli(
+          [
+            "commit",
+            "--dry-run",
+            "--api-key",
+            "test-key",
+            "--base-url",
+            llm.baseUrl,
+            "--model",
+            "test-model",
+          ],
+          { cwd: repo },
+        );
+
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("feat(api): update routes");
+        expect(yield* fileExists(repo, ".git-agent/config.yml")).toBe(false);
+        expect(llm.requests).toHaveLength(3);
+      }),
+    );
+
+    it.effect(
       "git commit creates split commits that match the planner groups",
       Effect.fn(function* () {
         const repo = yield* seedGitRepoWithScopes();

@@ -36,14 +36,13 @@ afterEach(() => {
 });
 
 describe("executeHooks", () => {
-  it("skips missing shell hooks like the Go version", async () => {
+  it("fails when a configured shell hook is missing", async () => {
     const dir = mkdtempSync(join(tmpdir(), "git-agent-hooks-"));
     tempDirs.push(dir);
+    const hookPath = join(dir, "missing-hook.sh");
 
-    const result = await runEffect(executeHooks([join(dir, "missing-hook.sh")], hookInput));
-    expect(result).toEqual({
-      exitCode: 0,
-      stderr: "",
+    await expect(runEffect(executeHooks([hookPath], hookInput))).rejects.toMatchObject({
+      message: expect.stringContaining(`failed to read hook "${hookPath}"`),
     });
   });
 
