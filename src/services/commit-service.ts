@@ -9,7 +9,6 @@ import { executeHooks } from "./hooks";
 import { generateCommitMessage, planCommits, type ProviderConfig } from "./openai-client";
 import { generateProjectScopes } from "./scope-service";
 import type { VcsClient, VcsDiff } from "./vcs";
-import { projectConfigPath, mergeAndSaveScopes } from "../config/project";
 
 const maxHookRetries = 3;
 const maxReplans = 2;
@@ -204,8 +203,6 @@ const withAutoScopes = Effect.fn(function* (
     ...(projectConfig ?? emptyProjectConfig()),
     scopes,
   } satisfies ProjectConfig;
-  const repoRoot = yield* vcs.repoRoot(cwd);
-  yield* mergeAndSaveScopes(yield* projectConfigPath(repoRoot), scopes);
   return nextConfig;
 });
 
@@ -457,8 +454,6 @@ const commitGit = Effect.fn(function* (request: CommitRequest, config: ProjectCo
         },
       },
     );
-    const repoRoot = yield* request.vcs.repoRoot(request.cwd);
-    yield* mergeAndSaveScopes(yield* projectConfigPath(repoRoot), refreshedScopes);
     groups = yield* Effect.withSpan(
       planGroups(request.provider, promptStaged.files, promptUnstaged.files, request.intent, {
         ...configWithScopes,

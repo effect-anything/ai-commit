@@ -70,6 +70,14 @@ const processError = (command: string, cause: unknown) =>
     stderr: cause instanceof Error ? cause.message : String(cause),
   });
 
+const checkIgnoreError = (result: ProcessResult) =>
+  new ProcessExecutionError({
+    command: "git check-ignore --stdin",
+    exitCode: result.exitCode,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  });
+
 const emptyIgnoreRules = (): IgnoreRules => ({
   directoryNames: new Set(),
   relativePaths: new Set(),
@@ -265,7 +273,7 @@ export const GitClientLive = Layer.effect(
         return new Set([...fallbackIgnored, ...normalizeLines(result.stdout).map(toPortablePath)]);
       }
 
-      return fallbackIgnored;
+      return yield* Effect.failSync(() => checkIgnoreError(result));
     });
 
     const buildScanState = Effect.fn(function* (root: string) {
@@ -587,7 +595,7 @@ export const JjClientLive = Layer.effect(
         return new Set([...fallbackIgnored, ...normalizeLines(result.stdout).map(toPortablePath)]);
       }
 
-      return fallbackIgnored;
+      return yield* Effect.failSync(() => checkIgnoreError(result));
     });
 
     const buildScanState = Effect.fn(function* (root: string) {

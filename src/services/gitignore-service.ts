@@ -1,5 +1,6 @@
 import { platform } from "node:os";
 import { Effect, FileSystem, Path } from "effect";
+import { HttpClient } from "effect/unstable/http";
 import { ApiError } from "../shared/errors";
 import { buildEnvironment } from "../config/env";
 import { detectTechnologies, type ProviderConfig } from "./openai-client";
@@ -99,28 +100,30 @@ const mergeGitignore = (existing: string, generated: string): string => {
 const fetchGitignore = Effect.fn(function* (technologies: ReadonlyArray<string>) {
   const env = yield* buildEnvironment;
   const baseUrl = env.gitignoreBaseUrl.replace(/\/$/, "");
-  return yield* Effect.tryPromise({
-    try: async () => {
-      const response = await fetch(
-        `${baseUrl}/${technologies.map((item) => encodeURIComponent(item)).join(",")}`,
-      );
-      const text = await response.text();
-      if (!response.ok) {
-        throw new ApiError({
-          message: `failed to fetch gitignore template (${response.status})`,
-          status: response.status,
-          body: text,
-        });
-      }
-      return text;
-    },
-    catch: (cause) =>
+  const url = `${baseUrl}/${technologies.map((item) => encodeURIComponent(item)).join(",")}`;
+  return yield* HttpClient.get(url).pipe(
+    Effect.flatMap((response) =>
+      Effect.flatMap(response.text, (text) =>
+        response.status >= 200 && response.status < 300
+          ? Effect.succeed(text)
+          : Effect.failSync(
+              () =>
+                new ApiError({
+                  message: `failed to fetch gitignore template (${response.status})`,
+                  status: response.status,
+                  body: text,
+                }),
+            ),
+      ),
+    ),
+    Effect.mapError((cause) =>
       ApiError.is(cause)
         ? cause
         : new ApiError({
             message: cause instanceof Error ? cause.message : String(cause),
           }),
-  });
+    ),
+  );
 });
 
 export const generateGitignore = Effect.fn(function* (

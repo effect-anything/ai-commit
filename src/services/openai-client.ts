@@ -50,24 +50,39 @@ const llmTransientRetrySchedule = Schedule.either(
   ),
 );
 
-const isReasoningModel = (model: string): boolean =>
-  ["o1", "o3", "o4"].some(
-    (prefix) =>
-      model === prefix || model.startsWith(`${prefix}-`) || model.startsWith(`${prefix}/`),
-  );
+const normalizeModelId = (model: string): string =>
+  model
+    .trim()
+    .toLowerCase()
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .at(-1) ?? "";
 
-const makeLanguageModelLayer = (config: ProviderConfig, maxTokens: number) =>
+export const isReasoningModel = (model: string): boolean => {
+  const modelId = normalizeModelId(model);
+
+  return (
+    modelId.startsWith("o1") ||
+    modelId.startsWith("o3") ||
+    modelId.startsWith("o4-mini") ||
+    modelId.startsWith("codex-mini") ||
+    modelId.startsWith("computer-use-preview") ||
+    (modelId.startsWith("gpt-5") && !modelId.startsWith("gpt-5-chat"))
+  );
+};
+
+const makeLanguageModelLayer = (config: ProviderConfig, maxOutputTokens: number) =>
   OpenAi.OpenAiLanguageModel.layer({
     model: config.model,
     config: isReasoningModel(config.model)
       ? {
-          max_output_tokens: maxTokens,
+          max_output_tokens: maxOutputTokens,
           reasoning: {
             effort: "low",
           },
         }
       : {
-          max_output_tokens: maxTokens,
+          max_output_tokens: maxOutputTokens,
           temperature: 0,
         },
   }).pipe(
@@ -83,7 +98,7 @@ const makeLanguageModelLayer = (config: ProviderConfig, maxTokens: number) =>
     ),
   );
 
-const callLlm = (config: ProviderConfig, system: string, user: string, maxTokens: number) =>
+const callLlm = (config: ProviderConfig, system: string, user: string, maxOutputTokens: number) =>
   LanguageModel.generateText({
     prompt: [
       { role: "system", content: system },
@@ -102,7 +117,7 @@ const callLlm = (config: ProviderConfig, system: string, user: string, maxTokens
               }),
           ),
     ),
-    Effect.provide(makeLanguageModelLayer(config, maxTokens)),
+    Effect.provide(makeLanguageModelLayer(config, maxOutputTokens)),
     Effect.catch((cause) =>
       ApiError.is(cause)
         ? Effect.failSync(() => cause)

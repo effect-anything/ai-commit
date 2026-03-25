@@ -31,14 +31,14 @@ const encodeHookInputToJson = Schema.encodeUnknownSync(Schema.Json);
 
 const executeShellHook = Effect.fn(function* (path: string, input: HookInput) {
   const fs = yield* FileSystem.FileSystem;
-  const info = yield* fs.stat(path).pipe(Effect.catch(() => Effect.succeed(undefined)));
-
-  if (info == null) {
-    return {
-      exitCode: 0,
-      stderr: "",
-    } satisfies HookResult;
-  }
+  const info = yield* fs.stat(path).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ConfigError({
+          message: `failed to read hook "${path}": ${cause.message}`,
+        }),
+    ),
+  );
 
   if ((info.mode & 0o111) === 0) {
     return yield* new ConfigError({
