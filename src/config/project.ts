@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Path } from "effect";
+import { Effect, FileSystem, Path, Schema } from "effect";
 import { parse, stringify } from "yaml";
 import type { ProjectConfig, ProjectScope } from "../domain/project";
 import { emptyProjectConfig } from "../domain/project";
@@ -6,6 +6,34 @@ import { ConfigError } from "../shared/errors";
 import { getKeyDef } from "./keys";
 
 type RawYamlMap = Record<string, unknown>;
+type RawScopeInput = string | { readonly name: string; readonly description?: string | undefined };
+type RawHookInput = string | ReadonlyArray<string>;
+
+const RawScopeSchema = Schema.Union([
+  Schema.String,
+  Schema.Struct({
+    name: Schema.String,
+    description: Schema.optional(Schema.String),
+  }),
+]);
+const RawHooksSchema = Schema.Union([Schema.String, Schema.Array(Schema.String)]);
+
+const configError = (pathValue: string, message: string) =>
+  new ConfigError({
+    message: `invalid config ${pathValue}: ${message}`,
+  });
+
+const decodeConfigField = <S extends Schema.Top>(
+  pathValue: string,
+  key: string,
+  input: unknown,
+  schema: S,
+) =>
+  input === undefined
+    ? Effect.succeed(undefined)
+    : Schema.decodeUnknownEffect(schema)(input).pipe(
+        Effect.mapError((cause) => configError(pathValue, `${key}: ${cause.message}`)),
+      );
 
 const readYamlMap = Effect.fn(function* (pathValue: string) {
   const fs = yield* FileSystem.FileSystem;
@@ -26,69 +54,87 @@ const readYamlMap = Effect.fn(function* (pathValue: string) {
   return yield* Effect.try({
     try: () => {
       const parsed = parse(text);
-      return typeof parsed === "object" && parsed !== null ? (parsed as RawYamlMap) : {};
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        throw configError(pathValue, "expected a YAML mapping");
+      }
+      return parsed as RawYamlMap;
     },
     catch: (cause) =>
-      new ConfigError({
-        message: `failed to read config ${pathValue}: ${cause instanceof Error ? cause.message : String(cause)}`,
-      }),
+      ConfigError.is(cause)
+        ? cause
+        : new ConfigError({
+            message: `failed to read config ${pathValue}: ${cause instanceof Error ? cause.message : String(cause)}`,
+          }),
   });
 });
 
-const scopeFromUnknown = (input: unknown): ProjectScope | undefined => {
-  if (typeof input === "string" && input.trim().length > 0) {
-    return { name: input.trim() };
+const normalizeScope = (
+  pathValue: string,
+  input: RawScopeInput,
+  index: number,
+): Effect.Effect<ProjectScope, ConfigError> => {
+  if (typeof input === "string") {
+    const name = input.trim();
+    return name.length > 0
+      ? Effect.succeed({ name })
+      : Effect.failSync(() => configError(pathValue, `scopes[${index}] must not be empty`));
   }
-  if (
-    typeof input === "object" &&
-    input !== null &&
-    "name" in input &&
-    typeof input.name === "string"
-  ) {
-    const description =
-      "description" in input &&
-      typeof input.description === "string" &&
-      input.description.trim().length > 0
-        ? input.description.trim()
-        : undefined;
-    return {
-      name: input.name.trim(),
-      ...(description != null ? { description } : {}),
-    };
+
+  const name = input.name.trim();
+  if (name.length === 0) {
+    return Effect.failSync(() => configError(pathValue, `scopes[${index}].name must not be empty`));
   }
-  return undefined;
+
+  const description = input.description?.trim();
+  return Effect.succeed({
+    name,
+    ...(description != null && description.length > 0 ? { description } : {}),
+  });
 };
 
-const parseScopes = (input: unknown): Array<ProjectScope> => {
-  if (!Array.isArray(input)) {
-    return [];
+const decodeScopes = Effect.fn(function* (pathValue: string, rawMap: RawYamlMap) {
+  const scopes = yield* decodeConfigField(
+    pathValue,
+    "scopes",
+    rawMap["scopes"],
+    Schema.Array(RawScopeSchema),
+  );
+  if (scopes == null) {
+    return [] as Array<ProjectScope>;
   }
-  return input.map(scopeFromUnknown).filter((scope): scope is ProjectScope => scope != null);
+  return yield* Effect.forEach(scopes, (scope, index) => normalizeScope(pathValue, scope, index));
+});
+
+const normalizeHookValues = (
+  pathValue: string,
+  key: "hook" | "hook_type",
+  input: RawHookInput,
+): Effect.Effect<Array<string>, ConfigError> => {
+  const normalized = (typeof input === "string" ? input.split(",") : [...input])
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  return normalized.length > 0
+    ? Effect.succeed(normalized)
+    : Effect.failSync(() => configError(pathValue, `${key} must not be empty`));
 };
 
-const parseHooks = (input: unknown, legacy: unknown): Array<string> => {
-  if (Array.isArray(input)) {
-    return input.filter(
-      (item): item is string => typeof item === "string" && item.trim().length > 0,
-    );
+const decodeHooks = Effect.fn(function* (pathValue: string, rawMap: RawYamlMap) {
+  const hooks = yield* decodeConfigField(pathValue, "hook", rawMap["hook"], RawHooksSchema);
+  if (hooks != null) {
+    return yield* normalizeHookValues(pathValue, "hook", hooks);
   }
-  if (typeof input === "string" && input.trim().length > 0) {
-    return input
-      .split(",")
-      .map((item) => item.trim())
-      .filter((item) => item.length > 0);
-  }
-  if (typeof legacy === "string" && legacy.trim().length > 0) {
-    return [legacy.trim()];
-  }
-  return [];
-};
 
-const parseBoolean = (input: unknown): boolean | undefined =>
-  typeof input === "boolean" ? input : undefined;
-
-const parseIntValue = (input: unknown): number | undefined =>
-  typeof input === "number" && Number.isInteger(input) ? input : undefined;
+  const legacyHook = yield* decodeConfigField(
+    pathValue,
+    "hook_type",
+    rawMap["hook_type"],
+    Schema.String,
+  );
+  if (legacyHook != null) {
+    return yield* normalizeHookValues(pathValue, "hook_type", legacyHook);
+  }
+  return [] as Array<string>;
+});
 
 const gitAgentPath = Effect.fn(function* (repoRoot: string, ...segments: ReadonlyArray<string>) {
   const path = yield* Path.Path;
@@ -118,24 +164,57 @@ export const loadProjectConfig = Effect.fn(function* (repoRoot: string) {
   const projectRaw = yield* readYamlMap(projectPath);
   const localRaw = yield* readYamlMap(localPath);
 
-  const mergedScopes =
-    parseScopes(localRaw["scopes"]).length > 0
-      ? parseScopes(localRaw["scopes"])
-      : parseScopes(projectRaw["scopes"]);
-  const mergedHooks =
-    parseHooks(localRaw["hook"], localRaw["hook_type"]).length > 0
-      ? parseHooks(localRaw["hook"], localRaw["hook_type"])
-      : parseHooks(projectRaw["hook"], projectRaw["hook_type"]);
-  const maxDiffLines =
-    parseIntValue(localRaw["max_diff_lines"]) ?? parseIntValue(projectRaw["max_diff_lines"]) ?? 0;
-  const noGitAgentCoAuthor =
-    parseBoolean(localRaw["no_git_agent_co_author"]) ??
-    parseBoolean(projectRaw["no_git_agent_co_author"]) ??
-    false;
-  const noModelCoAuthor =
-    parseBoolean(localRaw["no_model_co_author"]) ??
-    parseBoolean(projectRaw["no_model_co_author"]) ??
-    false;
+  const [
+    localScopes,
+    projectScopes,
+    localHooks,
+    projectHooks,
+    localMaxDiffLines,
+    projectMaxDiffLines,
+  ] = yield* Effect.all([
+    decodeScopes(localPath, localRaw),
+    decodeScopes(projectPath, projectRaw),
+    decodeHooks(localPath, localRaw),
+    decodeHooks(projectPath, projectRaw),
+    decodeConfigField(localPath, "max_diff_lines", localRaw["max_diff_lines"], Schema.Int),
+    decodeConfigField(projectPath, "max_diff_lines", projectRaw["max_diff_lines"], Schema.Int),
+  ]);
+  const mergedScopes = localScopes.length > 0 ? localScopes : projectScopes;
+  const mergedHooks = localHooks.length > 0 ? localHooks : projectHooks;
+  const maxDiffLines = localMaxDiffLines ?? projectMaxDiffLines ?? 0;
+  const [
+    localNoGitAgentCoAuthor,
+    projectNoGitAgentCoAuthor,
+    localNoModelCoAuthor,
+    projectNoModelCoAuthor,
+  ] = yield* Effect.all([
+    decodeConfigField(
+      localPath,
+      "no_git_agent_co_author",
+      localRaw["no_git_agent_co_author"],
+      Schema.Boolean,
+    ),
+    decodeConfigField(
+      projectPath,
+      "no_git_agent_co_author",
+      projectRaw["no_git_agent_co_author"],
+      Schema.Boolean,
+    ),
+    decodeConfigField(
+      localPath,
+      "no_model_co_author",
+      localRaw["no_model_co_author"],
+      Schema.Boolean,
+    ),
+    decodeConfigField(
+      projectPath,
+      "no_model_co_author",
+      projectRaw["no_model_co_author"],
+      Schema.Boolean,
+    ),
+  ]);
+  const noGitAgentCoAuthor = localNoGitAgentCoAuthor ?? projectNoGitAgentCoAuthor ?? false;
+  const noModelCoAuthor = localNoModelCoAuthor ?? projectNoModelCoAuthor ?? false;
 
   if (
     mergedScopes.length === 0 &&
@@ -163,7 +242,7 @@ export const mergeAndSaveScopes = Effect.fn(function* (
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const rawMap = yield* readYamlMap(pathValue);
-  const existingScopes = parseScopes(rawMap["scopes"]);
+  const existingScopes = yield* decodeScopes(pathValue, rawMap);
   const seen = new Set(existingScopes.map((scope) => scope.name.toLowerCase()));
   const merged = [...existingScopes];
 
