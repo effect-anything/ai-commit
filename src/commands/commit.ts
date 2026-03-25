@@ -112,7 +112,6 @@ const runCommitCommand = (input: CommitCommandInput) => {
             vcs: vcsKind,
             free: input.free,
           },
-          captureStackTrace: false,
         },
       );
 
@@ -129,7 +128,6 @@ const runCommitCommand = (input: CommitCommandInput) => {
           attributes: {
             vcs: vcsKind,
           },
-          captureStackTrace: false,
         })) ?? emptyProjectConfig();
       const trailers = yield* parseTrailers(
         input.coAuthor,
@@ -159,7 +157,6 @@ const runCommitCommand = (input: CommitCommandInput) => {
             no_stage: input.noStage,
             amend: input.amend,
           },
-          captureStackTrace: false,
         },
       );
     }),
@@ -171,7 +168,6 @@ const runCommitCommand = (input: CommitCommandInput) => {
         no_stage: input.noStage,
         requested_vcs: requestedVcs,
       },
-      captureStackTrace: false,
     },
   );
 };

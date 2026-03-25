@@ -34,6 +34,27 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Setup jj
+        env:
+          JJ_VERSION: "0.39.0"
+        run: |
+          case "$(uname -m)" in
+            x86_64) jj_arch="x86_64-unknown-linux-musl" ;;
+            aarch64|arm64) jj_arch="aarch64-unknown-linux-musl" ;;
+            *)
+              echo "Unsupported architecture: $(uname -m)" >&2
+              exit 1
+              ;;
+          esac
+
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+
+          curl -fsSL "https://github.com/jj-vcs/jj/releases/download/v${JJ_VERSION}/jj-v${JJ_VERSION}-${jj_arch}.tar.gz" \
+            | tar -xz -C "$tmpdir"
+          sudo install -m 0755 "$tmpdir/jj" /usr/local/bin/jj
+          jj --version
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 

@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { DateTime, Duration, Effect, Schema, Schedule } from "effect";
 import type { CommitGroup, CommitMessage, SingleCommitResult, Trailer } from "../domain/commit";
 import { renderCommitBody } from "../domain/commit";
 import type { ProjectConfig } from "../domain/project";
@@ -14,6 +14,23 @@ import { projectConfigPath, mergeAndSaveScopes } from "../config/project";
 const maxHookRetries = 3;
 const maxReplans = 2;
 const maxCommitGroups = 5;
+const hookRetrySchedule = Schedule.either(
+  Schedule.exponential("200 millis"),
+  Schedule.spaced("1 second"),
+).pipe(
+  Schedule.jittered,
+  Schedule.take(maxHookRetries - 1),
+  Schedule.delays,
+  Schedule.tapOutput((delay) =>
+    Effect.gen(function* () {
+      const retryAt = DateTime.addDuration(yield* DateTime.now, delay);
+      yield* Effect.annotateCurrentSpan({
+        retry_delay: Duration.format(delay).replace(/\s+\d+ns$/, ""),
+        retry_at: DateTime.formatIso(retryAt),
+      });
+    }),
+  ),
+);
 
 export interface CommitRequest {
   readonly cwd: string;
@@ -215,6 +232,140 @@ const planGroups = Effect.fn(function* (
   return appendPassthroughFiles(filtered, allowed).slice(0, maxCommitGroups);
 });
 
+class RetryableHookRejectionError extends Schema.TaggedErrorClass<RetryableHookRejectionError>()(
+  "RetryableHookRejectionError",
+  {
+    reason: Schema.String,
+    lastMessage: Schema.String,
+  },
+) {}
+
+interface AcceptedCommitMessageResult {
+  readonly _tag: "Accepted";
+  readonly message: CommitMessage;
+  readonly finalMessage: string;
+}
+
+interface RejectedCommitMessageResult {
+  readonly _tag: "Rejected";
+  readonly reason: string;
+  readonly lastMessage: string;
+}
+
+const isRetryableHookRejection = (error: unknown): error is RetryableHookRejectionError =>
+  error instanceof RetryableHookRejectionError;
+
+const generateCommitMessageWithHooks = Effect.fn(function* (
+  request: CommitRequest,
+  config: ProjectConfig,
+  options: {
+    readonly promptDiff: VcsDiff;
+    readonly groupDiff: VcsDiff;
+    readonly initialHookFeedback: string;
+    readonly groupIndex: number;
+    readonly groupTotal: number;
+  },
+) {
+  let hookFeedback = options.initialHookFeedback;
+  let previousMessage: string | undefined;
+  let attempt = 0;
+
+  return yield* Effect.withSpan(
+    Effect.gen(function* () {
+      attempt += 1;
+
+      const message = yield* Effect.withSpan(
+        generateCommitMessage({
+          provider: request.provider,
+          diff: options.promptDiff,
+          intent: request.intent,
+          config,
+          hookFeedback: hookFeedback.length > 0 ? hookFeedback : undefined,
+          previousMessage,
+        }),
+        "commit.generate-message",
+        {
+          attributes: {
+            vcs: request.vcs.kind,
+            group_index: options.groupIndex,
+            group_total: options.groupTotal,
+            attempt,
+            file_count: options.groupDiff.files.length,
+          },
+        },
+      );
+
+      const assembled = yield* request.vcs.formatTrailers(
+        request.cwd,
+        assembleMessage(message),
+        request.trailers,
+      );
+      const accepted = {
+        _tag: "Accepted",
+        message,
+        finalMessage: assembled,
+      } satisfies AcceptedCommitMessageResult;
+
+      if (config.hooks.length === 0) {
+        return accepted;
+      }
+
+      const hookResult = yield* Effect.withSpan(
+        executeHooks(config.hooks, {
+          diff: options.groupDiff.content,
+          commitMessage: assembled,
+          intent: request.intent,
+          stagedFiles: options.groupDiff.files,
+          config,
+        }),
+        "commit.run-hooks",
+        {
+          attributes: {
+            vcs: request.vcs.kind,
+            group_index: options.groupIndex,
+            group_total: options.groupTotal,
+            hook_count: config.hooks.length,
+          },
+        },
+      );
+
+      if (hookResult.exitCode === 0) {
+        return accepted;
+      }
+
+      hookFeedback = hookResult.stderr;
+      previousMessage = assembled;
+
+      return yield* new RetryableHookRejectionError({
+        reason: hookResult.stderr,
+        lastMessage: assembled,
+      });
+    }).pipe(
+      Effect.retry({
+        while: isRetryableHookRejection,
+        schedule: hookRetrySchedule,
+      }),
+      Effect.catchTag("RetryableHookRejectionError", (error) =>
+        Effect.succeed({
+          _tag: "Rejected",
+          reason: error.reason,
+          lastMessage: error.lastMessage,
+        } satisfies RejectedCommitMessageResult),
+      ),
+    ),
+    "commit.resolve-message",
+    {
+      attributes: {
+        vcs: request.vcs.kind,
+        group_index: options.groupIndex,
+        group_total: options.groupTotal,
+        file_count: options.groupDiff.files.length,
+        hook_count: config.hooks.length,
+      },
+    },
+  );
+});
+
 const commitGit = Effect.fn(function* (request: CommitRequest, config: ProjectConfig) {
   const { promptStaged, promptUnstaged } = yield* Effect.withSpan(
     Effect.gen(function* () {
@@ -269,7 +420,6 @@ const commitGit = Effect.fn(function* (request: CommitRequest, config: ProjectCo
         no_stage: request.noStage,
         dry_run: request.dryRun,
       },
-      captureStackTrace: false,
     },
   );
 
@@ -292,7 +442,6 @@ const commitGit = Effect.fn(function* (request: CommitRequest, config: ProjectCo
         staged_files: promptStaged.files.length,
         unstaged_files: promptUnstaged.files.length,
       },
-      captureStackTrace: false,
     },
   );
 
@@ -304,7 +453,6 @@ const commitGit = Effect.fn(function* (request: CommitRequest, config: ProjectCo
         attributes: {
           vcs: "git",
         },
-        captureStackTrace: false,
       },
     );
     const repoRoot = yield* request.vcs.repoRoot(request.cwd);
@@ -320,7 +468,6 @@ const commitGit = Effect.fn(function* (request: CommitRequest, config: ProjectCo
           vcs: "git",
           reason: "unscoped-groups",
         },
-        captureStackTrace: false,
       },
     );
   }
@@ -349,84 +496,24 @@ const commitGit = Effect.fn(function* (request: CommitRequest, config: ProjectCo
       request.maxDiffLines > 0
         ? truncateDiff(filterDiffForPrompt(groupDiff), request.maxDiffLines)
         : filterDiffForPrompt(groupDiff);
-    let hookFeedback = inheritedFeedback;
-    let previousMessage: string | undefined;
-    let lastMessage = "";
-    let accepted: CommitMessage | undefined;
+    const messageResult = yield* generateCommitMessageWithHooks(request, configWithScopes, {
+      promptDiff,
+      groupDiff,
+      initialHookFeedback: inheritedFeedback,
+      groupIndex: results.length + 1,
+      groupTotal: results.length + remaining.length + 1,
+    });
 
-    for (let attempt = 0; attempt < maxHookRetries; attempt += 1) {
-      const message = yield* Effect.withSpan(
-        generateCommitMessage({
-          provider: request.provider,
-          diff: promptDiff,
-          intent: request.intent,
-          config: configWithScopes,
-          hookFeedback: hookFeedback.length > 0 ? hookFeedback : undefined,
-          previousMessage,
-        }),
-        "commit.generate-message",
-        {
-          attributes: {
-            vcs: "git",
-            group_index: results.length + 1,
-            group_total: results.length + remaining.length + 1,
-            attempt: attempt + 1,
-            file_count: group.files.length,
-          },
-          captureStackTrace: false,
-        },
-      );
-      const assembled = yield* request.vcs.formatTrailers(
-        request.cwd,
-        assembleMessage(message),
-        request.trailers,
-      );
-      lastMessage = assembled;
-
-      if (configWithScopes.hooks.length === 0) {
-        accepted = message;
-        break;
-      }
-
-      const hookResult = yield* Effect.withSpan(
-        executeHooks(configWithScopes.hooks, {
-          diff: groupDiff.content,
-          commitMessage: assembled,
-          intent: request.intent,
-          stagedFiles: groupDiff.files,
-          config: configWithScopes,
-        }),
-        "commit.run-hooks",
-        {
-          attributes: {
-            vcs: "git",
-            group_index: results.length + 1,
-            group_total: results.length + remaining.length + 1,
-            hook_count: configWithScopes.hooks.length,
-          },
-          captureStackTrace: false,
-        },
-      );
-
-      if (hookResult.exitCode === 0) {
-        accepted = message;
-        break;
-      }
-
-      hookFeedback = hookResult.stderr;
-      previousMessage = assembled;
-    }
-
-    if (accepted == null) {
+    if (messageResult._tag === "Rejected") {
       if (replanCount >= maxReplans) {
         return yield* new HookBlockedError({
           message: "error: commit blocked after retries",
-          reason: hookFeedback,
-          lastMessage,
+          reason: messageResult.reason,
+          lastMessage: messageResult.lastMessage,
         });
       }
       replanCount += 1;
-      inheritedFeedback = hookFeedback;
+      inheritedFeedback = messageResult.reason;
       const regroupedFiles = [
         ...new Set([...(group.files ?? []), ...remaining.flatMap((item) => item.files)]),
       ];
@@ -442,29 +529,23 @@ const commitGit = Effect.fn(function* (request: CommitRequest, config: ProjectCo
               reason: "hook-failures",
               file_count: regroupedFiles.length,
             },
-            captureStackTrace: false,
           },
         )),
       ];
       continue;
     }
 
-    const finalMessage = yield* request.vcs.formatTrailers(
-      request.cwd,
-      assembleMessage(accepted),
-      request.trailers,
-    );
     const result: SingleCommitResult = {
-      title: accepted.title,
-      bullets: accepted.bullets,
-      explanation: accepted.explanation,
+      title: messageResult.message.title,
+      bullets: messageResult.message.bullets,
+      explanation: messageResult.message.explanation,
       files: [...group.files],
       output: undefined,
     };
 
     if (!request.dryRun) {
       const output = yield* Effect.withSpan(
-        request.vcs.commit(request.cwd, finalMessage),
+        request.vcs.commit(request.cwd, messageResult.finalMessage),
         "commit.create",
         {
           attributes: {
@@ -474,7 +555,6 @@ const commitGit = Effect.fn(function* (request: CommitRequest, config: ProjectCo
             file_count: group.files.length,
             step,
           },
-          captureStackTrace: false,
         },
       );
       results.push({
@@ -513,7 +593,6 @@ const commitJj = Effect.fn(function* (request: CommitRequest, config: ProjectCon
         vcs: "jj",
         dry_run: request.dryRun,
       },
-      captureStackTrace: false,
     },
   );
   const configWithScopes =
@@ -530,7 +609,6 @@ const commitJj = Effect.fn(function* (request: CommitRequest, config: ProjectCon
         vcs: "jj",
         unstaged_files: promptDiff.files.length,
       },
-      captureStackTrace: false,
     },
   );
 
@@ -558,84 +636,24 @@ const commitJj = Effect.fn(function* (request: CommitRequest, config: ProjectCon
       request.maxDiffLines > 0
         ? truncateDiff(filterDiffForPrompt(groupDiff), request.maxDiffLines)
         : filterDiffForPrompt(groupDiff);
-    let hookFeedback = inheritedFeedback;
-    let previousMessage: string | undefined;
-    let lastMessage = "";
-    let accepted: CommitMessage | undefined;
+    const messageResult = yield* generateCommitMessageWithHooks(request, configWithScopes, {
+      promptDiff: truncated,
+      groupDiff,
+      initialHookFeedback: inheritedFeedback,
+      groupIndex: results.length + 1,
+      groupTotal: results.length + remaining.length + 1,
+    });
 
-    for (let attempt = 0; attempt < maxHookRetries; attempt += 1) {
-      const message = yield* Effect.withSpan(
-        generateCommitMessage({
-          provider: request.provider,
-          diff: truncated,
-          intent: request.intent,
-          config: configWithScopes,
-          hookFeedback: hookFeedback.length > 0 ? hookFeedback : undefined,
-          previousMessage,
-        }),
-        "commit.generate-message",
-        {
-          attributes: {
-            vcs: "jj",
-            group_index: results.length + 1,
-            group_total: results.length + remaining.length + 1,
-            attempt: attempt + 1,
-            file_count: group.files.length,
-          },
-          captureStackTrace: false,
-        },
-      );
-      const assembled = yield* request.vcs.formatTrailers(
-        request.cwd,
-        assembleMessage(message),
-        request.trailers,
-      );
-      lastMessage = assembled;
-
-      if (configWithScopes.hooks.length === 0) {
-        accepted = message;
-        break;
-      }
-
-      const hookResult = yield* Effect.withSpan(
-        executeHooks(configWithScopes.hooks, {
-          diff: groupDiff.content,
-          commitMessage: assembled,
-          intent: request.intent,
-          stagedFiles: groupDiff.files,
-          config: configWithScopes,
-        }),
-        "commit.run-hooks",
-        {
-          attributes: {
-            vcs: "jj",
-            group_index: results.length + 1,
-            group_total: results.length + remaining.length + 1,
-            hook_count: configWithScopes.hooks.length,
-          },
-          captureStackTrace: false,
-        },
-      );
-
-      if (hookResult.exitCode === 0) {
-        accepted = message;
-        break;
-      }
-
-      hookFeedback = hookResult.stderr;
-      previousMessage = assembled;
-    }
-
-    if (accepted == null) {
+    if (messageResult._tag === "Rejected") {
       if (replanCount >= maxReplans) {
         return yield* new HookBlockedError({
           message: "error: commit blocked after retries",
-          reason: hookFeedback,
-          lastMessage,
+          reason: messageResult.reason,
+          lastMessage: messageResult.lastMessage,
         });
       }
       replanCount += 1;
-      inheritedFeedback = hookFeedback;
+      inheritedFeedback = messageResult.reason;
       const regroupedFiles = [
         ...new Set([...(group.files ?? []), ...remaining.flatMap((item) => item.files)]),
       ];
@@ -651,29 +669,23 @@ const commitJj = Effect.fn(function* (request: CommitRequest, config: ProjectCon
               reason: "hook-failures",
               file_count: regroupedFiles.length,
             },
-            captureStackTrace: false,
           },
         )),
       ];
       continue;
     }
 
-    const finalMessage = yield* request.vcs.formatTrailers(
-      request.cwd,
-      assembleMessage(accepted),
-      request.trailers,
-    );
     const result: SingleCommitResult = {
-      title: accepted.title,
-      bullets: accepted.bullets,
-      explanation: accepted.explanation,
+      title: messageResult.message.title,
+      bullets: messageResult.message.bullets,
+      explanation: messageResult.message.explanation,
       files: [...group.files],
       output: undefined,
     };
 
     if (!request.dryRun) {
       const output = yield* Effect.withSpan(
-        request.vcs.commit(request.cwd, finalMessage, group.files),
+        request.vcs.commit(request.cwd, messageResult.finalMessage, group.files),
         "commit.create",
         {
           attributes: {
@@ -683,7 +695,6 @@ const commitJj = Effect.fn(function* (request: CommitRequest, config: ProjectCon
             file_count: group.files.length,
             step,
           },
-          captureStackTrace: false,
         },
       );
       yield* ensureJjWorkingCopyMatchesPlan(request, remaining);
@@ -718,7 +729,6 @@ export const runCommitService = Effect.fn(function* (request: CommitRequest) {
         attributes: {
           vcs: request.vcs.kind,
         },
-        captureStackTrace: false,
       },
     );
     if (diff.files.length === 0) {
@@ -743,7 +753,6 @@ export const runCommitService = Effect.fn(function* (request: CommitRequest) {
           vcs: request.vcs.kind,
           file_count: diff.files.length,
         },
-        captureStackTrace: false,
       },
     );
     const assembled = yield* request.vcs.formatTrailers(
@@ -767,7 +776,6 @@ export const runCommitService = Effect.fn(function* (request: CommitRequest) {
             vcs: request.vcs.kind,
             file_count: diff.files.length,
           },
-          captureStackTrace: false,
         },
       );
       return {
