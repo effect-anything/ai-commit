@@ -7,10 +7,20 @@ import { afterEach, describe, expect, it } from "vitest";
 const repoRoot = process.cwd();
 const tempDirs: Array<string> = [];
 
-const runCli = (args: ReadonlyArray<string>) =>
+const runCli = (
+  args: ReadonlyArray<string>,
+  options?: {
+    readonly cwd?: string;
+    readonly env?: Record<string, string | undefined>;
+  },
+) =>
   spawnSync("bun", ["src/cli.ts", ...args], {
-    cwd: repoRoot,
+    cwd: options?.cwd ?? repoRoot,
     encoding: "utf8",
+    env: {
+      ...process.env,
+      ...options?.env,
+    },
   });
 
 const newGitRepo = (): string => {
@@ -83,6 +93,37 @@ describe("cli smoke", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("reading hook file");
+  });
+
+  it("config show resolves provider settings from environment", () => {
+    const dir = newGitRepo();
+    const xdgHome = mkdtempSync(join(tmpdir(), "git-agent-cli-xdg-"));
+    tempDirs.push(xdgHome);
+
+    const result = runCli(["config", "show", "--cwd", dir], {
+      env: {
+        XDG_CONFIG_HOME: xdgHome,
+        OPENAI_COMPACT_API_KEY: "",
+        OPENAI_COMPACT_API_BASE_URL: "",
+        OPENAI_COMPACT_MODEL: "",
+        GIT_AGENT_BUILD_API_KEY: "",
+        GIT_AGENT_BUILD_BASE_URL: "https://build.example/v1",
+        GIT_AGENT_BUILD_MODEL: "build-model",
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("api_key:  (not set)");
+    expect(result.stdout).toContain("model:    build-model");
+    expect(result.stdout).toContain("base_url: https://build.example/v1");
+  });
+
+  it("init --local rejects runs that do not request any action", () => {
+    const dir = newGitRepo();
+    const result = runCli(["init", "--cwd", dir, "--local"]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("--local requires at least one action flag");
   });
 
   it("init --local reports the local config path when it already exists", () => {
