@@ -6,9 +6,7 @@ Jujutsu (`jj`) repositories.
 
 ## Demo
 
-<video src="./docs/sceen-recording.mp4" controls muted playsinline>
-  Your browser does not support the video tag.
-</video>
+![CLI demo](./docs/sceen-recording.gif)
 
 ## Acknowledgements
 
