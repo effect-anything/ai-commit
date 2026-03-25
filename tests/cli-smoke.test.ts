@@ -30,6 +30,32 @@ afterEach(() => {
 });
 
 describe("cli smoke", () => {
+  it("prints the package version", () => {
+    const result = runCli(["version"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe("0.1.0");
+    expect(result.stderr).toBe("");
+  });
+
+  it("does not leak ShowHelp internals when invoked without a subcommand", () => {
+    const result = runCli([]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("USAGE");
+    expect(result.stderr).not.toContain("~effect/cli/CliError/ShowHelp");
+    expect(result.stderr).not.toContain("Help requested");
+  });
+
+  it("does not leak ShowHelp internals for unknown subcommands", () => {
+    const result = runCli(["wat"]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Unknown subcommand "wat" for "git-agent"');
+    expect(result.stderr).not.toContain("~effect/cli/CliError/ShowHelp");
+    expect(result.stderr).not.toContain("Help requested");
+  });
+
   it("config get prefers local hook over project hook", () => {
     const dir = newGitRepo();
     mkdirSync(join(dir, ".git-agent"), { recursive: true });
@@ -57,5 +83,17 @@ describe("cli smoke", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("reading hook file");
+  });
+
+  it("init --local reports the local config path when it already exists", () => {
+    const dir = newGitRepo();
+    mkdirSync(join(dir, ".git-agent"), { recursive: true });
+    writeFileSync(join(dir, ".git-agent", "config.local.yml"), "hook:\n  - conventional\n");
+
+    const result = runCli(["init", "--cwd", dir, "--local", "--hook", "conventional"]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(join(dir, ".git-agent", "config.local.yml"));
+    expect(result.stderr).not.toContain(join(dir, ".git-agent", "config.yml"));
   });
 });
