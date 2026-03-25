@@ -1,6 +1,7 @@
 import * as OpenAi from "@effect/ai-openai";
-import { Effect, Layer, Redacted } from "effect";
+import { DateTime, Duration, Effect, Layer, Redacted, Schedule } from "effect";
 import { LanguageModel } from "effect/unstable/ai";
+import { HttpClient } from "effect/unstable/http";
 import type { CommitMessage, CommitPlan } from "../domain/commit";
 import type { ProjectConfig, ProjectScope } from "../domain/project";
 import { ApiError } from "../shared/errors";
@@ -12,6 +13,24 @@ export interface ProviderConfig {
   readonly baseUrl: string;
   readonly model: string;
 }
+
+const llmTransientRetrySchedule = Schedule.either(
+  Schedule.exponential("250 millis"),
+  Schedule.spaced("2 seconds"),
+).pipe(
+  Schedule.jittered,
+  Schedule.take(2),
+  Schedule.delays,
+  Schedule.tapOutput((delay) =>
+    Effect.gen(function* () {
+      const retryAt = DateTime.addDuration(yield* DateTime.now, delay);
+      yield* Effect.annotateCurrentSpan({
+        retry_delay: Duration.format(delay).replace(/\s+\d+ns$/, ""),
+        retry_at: DateTime.formatIso(retryAt),
+      });
+    }),
+  ),
+);
 
 const isReasoningModel = (model: string): boolean =>
   ["o1", "o3", "o4"].some(
@@ -38,6 +57,10 @@ const makeLanguageModelLayer = (config: ProviderConfig, maxTokens: number) =>
       OpenAi.OpenAiClient.layer({
         apiKey: Redacted.make(config.apiKey),
         apiUrl: config.baseUrl,
+        transformClient: (client) =>
+          HttpClient.retryTransient(client, {
+            schedule: llmTransientRetrySchedule,
+          }),
       }),
     ),
   );

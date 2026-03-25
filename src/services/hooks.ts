@@ -100,7 +100,6 @@ export const executeHooks = Effect.fn(function* (hooks: ReadonlyArray<string>, i
           hook,
           hook_type: hook === "conventional" ? "conventional" : "shell",
         },
-        captureStackTrace: false,
       },
     );
 
