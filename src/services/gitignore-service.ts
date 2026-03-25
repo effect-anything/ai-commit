@@ -96,68 +96,70 @@ const mergeGitignore = (existing: string, generated: string): string => {
   return `${generated.trimEnd()}\n\n${customSection}\n${unique.join("\n")}\n`;
 };
 
-const fetchGitignore = (technologies: ReadonlyArray<string>) =>
-  Effect.gen(function* () {
-    const env = yield* buildEnvironment;
-    const baseUrl = env.gitignoreBaseUrl.replace(/\/$/, "");
-    return yield* Effect.tryPromise({
-      try: async () => {
-        const response = await fetch(
-          `${baseUrl}/${technologies.map((item) => encodeURIComponent(item)).join(",")}`,
-        );
-        const text = await response.text();
-        if (!response.ok) {
-          throw new ApiError({
-            message: `failed to fetch gitignore template (${response.status})`,
-            status: response.status,
-            body: text,
-          });
-        }
-        return text;
-      },
-      catch: (cause) =>
-        cause instanceof ApiError
-          ? cause
-          : new ApiError({
-              message: cause instanceof Error ? cause.message : String(cause),
-            }),
-    });
-  });
-
-export const generateGitignore = (provider: ProviderConfig, vcs: VcsClient, cwd: string) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const [dirs, files] = yield* Effect.all([vcs.topLevelDirs(cwd), vcs.projectFiles(cwd)]);
-    let technologies = yield* detectTechnologies(provider, runtimeOs(), dirs, files);
-    const fetched = yield* fetchGitignore(technologies);
-    const actualTechnologies = toptalTechs(fetched);
-    if (actualTechnologies.length > 0) {
-      technologies = actualTechnologies;
-    }
-
-    const gitignorePath = path.join(cwd, ".gitignore");
-    const existing = yield* fs.exists(gitignorePath).pipe(
-      Effect.flatMap((exists) =>
-        exists ? fs.readFileString(gitignorePath, "utf8") : Effect.succeed(""),
-      ),
-      Effect.mapError(
-        (cause) =>
-          new ApiError({
-            message: `failed to write .gitignore: ${cause.message}`,
+const fetchGitignore = Effect.fn(function* (technologies: ReadonlyArray<string>) {
+  const env = yield* buildEnvironment;
+  const baseUrl = env.gitignoreBaseUrl.replace(/\/$/, "");
+  return yield* Effect.tryPromise({
+    try: async () => {
+      const response = await fetch(
+        `${baseUrl}/${technologies.map((item) => encodeURIComponent(item)).join(",")}`,
+      );
+      const text = await response.text();
+      if (!response.ok) {
+        throw new ApiError({
+          message: `failed to fetch gitignore template (${response.status})`,
+          status: response.status,
+          body: text,
+        });
+      }
+      return text;
+    },
+    catch: (cause) =>
+      cause instanceof ApiError
+        ? cause
+        : new ApiError({
+            message: cause instanceof Error ? cause.message : String(cause),
           }),
-      ),
-    );
-    const generated = wrapGenerated(fetched, technologies);
-    const content = existing.length === 0 ? generated : mergeGitignore(existing, generated);
-
-    yield* fs.writeFileString(gitignorePath, content, { mode: 0o644 }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new ApiError({
-            message: `failed to write .gitignore: ${cause.message}`,
-          }),
-      ),
-    );
-    return technologies;
   });
+});
+
+export const generateGitignore = Effect.fn(function* (
+  provider: ProviderConfig,
+  vcs: VcsClient,
+  cwd: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const [dirs, files] = yield* Effect.all([vcs.topLevelDirs(cwd), vcs.projectFiles(cwd)]);
+  let technologies = yield* detectTechnologies(provider, runtimeOs(), dirs, files);
+  const fetched = yield* fetchGitignore(technologies);
+  const actualTechnologies = toptalTechs(fetched);
+  if (actualTechnologies.length > 0) {
+    technologies = actualTechnologies;
+  }
+
+  const gitignorePath = path.join(cwd, ".gitignore");
+  const existing = yield* fs.exists(gitignorePath).pipe(
+    Effect.flatMap((exists) =>
+      exists ? fs.readFileString(gitignorePath, "utf8") : Effect.succeed(""),
+    ),
+    Effect.mapError(
+      (cause) =>
+        new ApiError({
+          message: `failed to write .gitignore: ${cause.message}`,
+        }),
+    ),
+  );
+  const generated = wrapGenerated(fetched, technologies);
+  const content = existing.length === 0 ? generated : mergeGitignore(existing, generated);
+
+  yield* fs.writeFileString(gitignorePath, content, { mode: 0o644 }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ApiError({
+          message: `failed to write .gitignore: ${cause.message}`,
+        }),
+    ),
+  );
+  return technologies;
+});

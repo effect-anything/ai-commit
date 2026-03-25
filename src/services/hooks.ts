@@ -1,6 +1,6 @@
-import { Effect, FileSystem, Path } from "effect";
+import { Effect, FileSystem, Formatter, Path, Schema } from "effect";
 import type { ProjectConfig } from "../domain/project";
-import { ConfigError } from "../shared/errors";
+import { ConfigError, renderError } from "../shared/errors";
 import { runProcess } from "../shared/process";
 import {
   hasErrors,
@@ -27,39 +27,48 @@ export interface InstalledHookValue {
   readonly installedFrom: string | undefined;
 }
 
-const executeShellHook = (path: string, input: HookInput) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const info = yield* fs.stat(path).pipe(Effect.catch(() => Effect.succeed(undefined)));
+const encodeHookInputToJson = Schema.encodeUnknownSync(Schema.Json);
 
-    if (info == null) {
-      return {
-        exitCode: 0,
-        stderr: "",
-      } satisfies HookResult;
-    }
+const executeShellHook = Effect.fn(function* (path: string, input: HookInput) {
+  const fs = yield* FileSystem.FileSystem;
+  const info = yield* fs.stat(path).pipe(Effect.catch(() => Effect.succeed(undefined)));
 
-    if ((info.mode & 0o111) === 0) {
-      return yield* Effect.fail(
-        new ConfigError({
-          message: `hook is not executable: ${path}`,
-        }),
-      );
-    }
+  if (info == null) {
+    return {
+      exitCode: 0,
+      stderr: "",
+    } satisfies HookResult;
+  }
 
-    return yield* Effect.map(
-      runProcess({
-        command: path,
-        stdin: JSON.stringify(input),
-        allowFailure: true,
-      }),
+  if ((info.mode & 0o111) === 0) {
+    return yield* new ConfigError({
+      message: `hook is not executable: ${path}`,
+    });
+  }
+
+  return yield* runProcess({
+    command: "/bin/sh",
+    args: [path],
+    stdin: Formatter.formatJson(encodeHookInputToJson(input)),
+    allowFailure: true,
+  }).pipe(
+    Effect.map(
       (result) =>
         ({
           exitCode: result.exitCode,
           stderr: result.stderr,
         }) satisfies HookResult,
-    );
-  });
+    ),
+    Effect.catch((cause) =>
+      Effect.failSync(
+        () =>
+          new ConfigError({
+            message: `failed to run hook "${path}": ${renderError(cause)}`,
+          }),
+      ),
+    ),
+  );
+});
 
 const executeConventionalHook = (input: HookInput): HookResult => {
   const result = validateConventional(input.commitMessage);
@@ -74,81 +83,88 @@ const executeConventionalHook = (input: HookInput): HookResult => {
   };
 };
 
-export const executeHooks = (hooks: ReadonlyArray<string>, input: HookInput) =>
-  Effect.gen(function* () {
-    let warnings = "";
-    for (const hook of hooks) {
-      if (hook === "" || hook === "empty") {
-        continue;
-      }
-
-      const result =
-        hook === "conventional"
-          ? executeConventionalHook(input)
-          : yield* executeShellHook(hook, input);
-
-      if (result.exitCode !== 0) {
-        return result;
-      }
-
-      if (result.stderr.trim().length > 0) {
-        warnings = warnings.length === 0 ? result.stderr : `${warnings}\n${result.stderr}`;
-      }
+export const executeHooks = Effect.fn(function* (hooks: ReadonlyArray<string>, input: HookInput) {
+  let warnings = "";
+  for (const hook of hooks) {
+    if (hook === "" || hook === "empty") {
+      continue;
     }
 
+    const result = yield* Effect.withSpan(
+      hook === "conventional"
+        ? Effect.succeed(executeConventionalHook(input))
+        : executeShellHook(hook, input),
+      "hooks.execute",
+      {
+        attributes: {
+          hook,
+          hook_type: hook === "conventional" ? "conventional" : "shell",
+        },
+        captureStackTrace: false,
+      },
+    );
+
+    if (result.exitCode !== 0) {
+      return result;
+    }
+
+    if (result.stderr.trim().length > 0) {
+      warnings = warnings.length === 0 ? result.stderr : `${warnings}\n${result.stderr}`;
+    }
+  }
+
+  return {
+    exitCode: 0,
+    stderr: warnings,
+  } satisfies HookResult;
+});
+
+export const installHookValue = Effect.fn(function* (repoRoot: string, key: string, value: string) {
+  if (key !== "hook") {
     return {
-      exitCode: 0,
-      stderr: warnings,
-    } satisfies HookResult;
-  });
-
-export const installHookValue = (repoRoot: string, key: string, value: string) =>
-  Effect.gen(function* () {
-    if (key !== "hook") {
-      return {
-        value,
-        installedFrom: undefined,
-      } satisfies InstalledHookValue;
-    }
-    if (value === "conventional" || value === "empty") {
-      return {
-        value,
-        installedFrom: undefined,
-      } satisfies InstalledHookValue;
-    }
-
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const sourcePath = path.resolve(value);
-    const data = yield* fs.readFile(value).pipe(
-      Effect.mapError(
-        (cause) =>
-          new ConfigError({
-            message: `reading hook file "${value}": ${cause.message}`,
-          }),
-      ),
-    );
-    const destination = path.join(repoRoot, ".git-agent", "hooks", "pre-commit");
-
-    yield* fs.makeDirectory(path.dirname(destination), { recursive: true }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new ConfigError({
-            message: `creating hooks dir: ${cause.message}`,
-          }),
-      ),
-    );
-    yield* fs.writeFile(destination, data, { mode: 0o755 }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new ConfigError({
-            message: `installing hook: ${cause.message}`,
-          }),
-      ),
-    );
-
-    return {
-      value: sourcePath,
-      installedFrom: value,
+      value,
+      installedFrom: undefined,
     } satisfies InstalledHookValue;
-  });
+  }
+  if (value === "conventional" || value === "empty") {
+    return {
+      value,
+      installedFrom: undefined,
+    } satisfies InstalledHookValue;
+  }
+
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const sourcePath = path.resolve(value);
+  const data = yield* fs.readFile(value).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ConfigError({
+          message: `reading hook file "${value}": ${cause.message}`,
+        }),
+    ),
+  );
+  const destination = path.join(repoRoot, ".git-agent", "hooks", "pre-commit");
+
+  yield* fs.makeDirectory(path.dirname(destination), { recursive: true }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ConfigError({
+          message: `creating hooks dir: ${cause.message}`,
+        }),
+    ),
+  );
+  yield* fs.writeFile(destination, data, { mode: 0o755 }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ConfigError({
+          message: `installing hook: ${cause.message}`,
+        }),
+    ),
+  );
+
+  return {
+    value: sourcePath,
+    installedFrom: value,
+  } satisfies InstalledHookValue;
+});

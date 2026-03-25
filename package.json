@@ -1,7 +1,7 @@
 {
-  "name": "@effect-x/git-agent-cli",
+  "name": "@effect-x/ai-commit",
   "version": "0.1.0",
-  "description": "Effect v4 rewrite of git-agent with git and jj support.",
+  "description": "Effect rewrite of git-agent with git and jj support.",
   "keywords": [
     "cli",
     "commit",
@@ -24,7 +24,7 @@
     "url": "git+https://github.com/effect-anything/git-agent-cli.git"
   },
   "bin": {
-    "git-agent": "dist/cli.js"
+    "ai-commit": "dist/cli.js"
   },
   "files": [
     "dist",

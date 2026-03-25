@@ -17,22 +17,21 @@ const conventionalTypes = new Set([
   "revert",
 ]);
 
-export const generateProjectScopes = (
+export const generateProjectScopes = Effect.fn(function* (
   provider: ProviderConfig,
   vcs: VcsClient,
   cwd: string,
   maxCommits: number,
-) =>
-  Effect.gen(function* () {
-    const [commits, dirs, files] = yield* Effect.all([
-      vcs.commitLog(cwd, maxCommits),
-      vcs.topLevelDirs(cwd),
-      vcs.projectFiles(cwd),
-    ]);
+) {
+  const [commits, dirs, files] = yield* Effect.all([
+    vcs.commitLog(cwd, maxCommits),
+    vcs.topLevelDirs(cwd),
+    vcs.projectFiles(cwd),
+  ]);
 
-    const scopes = yield* generateScopes(provider, commits, dirs, files);
-    return scopes.filter((scope) => !conventionalTypes.has(scope.name.toLowerCase()));
-  });
+  const scopes = yield* generateScopes(provider, commits, dirs, files);
+  return scopes.filter((scope) => !conventionalTypes.has(scope.name.toLowerCase()));
+});
 
 export const formatScopeNames = (scopes: ReadonlyArray<ProjectScope>): Array<string> =>
   scopes.map((scope) => scope.name);

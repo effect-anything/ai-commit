@@ -1,4 +1,4 @@
-import { Console, Effect } from "effect";
+import { Console, Effect, Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { loadProjectConfig } from "../config/project";
 import { resolveProviderConfig } from "../config/provider";
@@ -7,9 +7,8 @@ import { emptyProjectConfig } from "../domain/project";
 import { ConfigError } from "../shared/errors";
 import { printCommitResult, printDryRunResult } from "../shared/output";
 import { parseCsvValues } from "../shared/text";
-import { withProgressSpan } from "../shared/tracing";
 import { runCommitService } from "../services/commit-service";
-import { detectVcs, getVcsClient } from "../services/vcs";
+import { Vcs } from "../services/vcs";
 import {
   apiKeyFlag,
   baseUrlFlag,
@@ -20,106 +19,162 @@ import {
   vcsFlag,
 } from "./shared";
 
-const parseTrailers = (
+const parseTrailers = Effect.fn(function* (
   coAuthors: ReadonlyArray<string>,
   trailerValues: ReadonlyArray<string>,
   includeAttribution: boolean,
   ignoreCoAuthor: boolean,
-): Effect.Effect<Array<Trailer>, ConfigError> =>
-  Effect.gen(function* () {
-    const trailers: Array<Trailer> = [];
-    if (!ignoreCoAuthor) {
-      for (const value of parseCsvValues(coAuthors)) {
-        trailers.push({
-          key: "Co-Authored-By",
-          value,
-        });
-      }
-    }
-    for (const value of parseCsvValues(trailerValues)) {
-      const trailer = parseTrailerText(value);
-      if (trailer == null) {
-        return yield* Effect.fail(
-          new ConfigError({
-            message: `invalid --trailer format "${value}": expected "Key: Value"`,
-          }),
-        );
-      }
-      trailers.push({
-        key: trailer.key,
-        value: trailer.value,
-      });
-    }
-    if (includeAttribution) {
+) {
+  const trailers: Array<Trailer> = [];
+  if (!ignoreCoAuthor) {
+    for (const value of parseCsvValues(coAuthors)) {
       trailers.push({
         key: "Co-Authored-By",
-        value: "Git Agent <noreply@git-agent.dev>",
+        value,
       });
     }
-    return trailers;
-  });
-
-const runCommitCommand = Effect.fn(
-  function* (input) {
-    if (input.amend && input.noStage) {
-      return yield* Effect.fail(
-        new ConfigError({ message: "--amend and --no-stage cannot be used together" }),
-      );
+  }
+  for (const value of parseCsvValues(trailerValues)) {
+    const trailer = parseTrailerText(value);
+    if (trailer == null) {
+      return yield* new ConfigError({
+        message: `invalid --trailer format "${value}": expected "Key: Value"`,
+      });
     }
-
-    const vcsKind = yield* detectVcs(input.cwd, toOptionalString(input.vcs));
-    yield* Effect.annotateCurrentSpan({
-      vcs: vcsKind,
+    trailers.push({
+      key: trailer.key,
+      value: trailer.value,
     });
-    const vcs = getVcsClient(vcsKind);
-    const provider = yield* resolveProviderConfig({
-      cwd: input.cwd,
-      vcs: vcsKind,
-      apiKey: toOptionalString(input.apiKey),
-      baseUrl: toOptionalString(input.baseUrl),
-      model: toOptionalString(input.model),
-      free: input.free,
+  }
+  if (includeAttribution) {
+    trailers.push({
+      key: "Co-Authored-By",
+      value: "Git Agent <noreply@git-agent.dev>",
     });
+  }
+  return trailers;
+});
 
-    if (provider.apiKey.length === 0) {
-      return yield* Effect.fail(
-        new ConfigError({
+interface CommitCommandInput {
+  readonly cwd: string;
+  readonly vcs: Option.Option<string>;
+  readonly apiKey: Option.Option<string>;
+  readonly baseUrl: Option.Option<string>;
+  readonly model: Option.Option<string>;
+  readonly free: boolean;
+  readonly intent: Option.Option<string>;
+  readonly dryRun: boolean;
+  readonly noStage: boolean;
+  readonly amend: boolean;
+  readonly maxDiffLines: number;
+  readonly noAttribution: boolean;
+  readonly coAuthor: ReadonlyArray<string>;
+  readonly trailer: ReadonlyArray<string>;
+}
+
+const runCommitCommand = (input: CommitCommandInput) => {
+  const requestedVcs = toOptionalString(input.vcs) ?? "auto";
+  return Effect.withSpan(
+    Effect.gen(function* () {
+      yield* Effect.annotateCurrentSpan({
+        amend: input.amend,
+        dry_run: input.dryRun,
+        no_stage: input.noStage,
+        requested_vcs: requestedVcs,
+      });
+      if (input.amend && input.noStage) {
+        return yield* new ConfigError({
+          message: "--amend and --no-stage cannot be used together",
+        });
+      }
+
+      const vcsService = yield* Vcs;
+      const { kind: vcsKind, client: vcs } = yield* vcsService.resolve(
+        input.cwd,
+        toOptionalString(input.vcs),
+      );
+      yield* Effect.annotateCurrentSpan({
+        vcs: vcsKind,
+      });
+      const provider = yield* Effect.withSpan(
+        resolveProviderConfig({
+          cwd: input.cwd,
+          vcs: vcsKind,
+          apiKey: toOptionalString(input.apiKey),
+          baseUrl: toOptionalString(input.baseUrl),
+          model: toOptionalString(input.model),
+          free: input.free,
+        }),
+        "commit.resolve-provider",
+        {
+          attributes: {
+            requested_vcs: requestedVcs,
+            vcs: vcsKind,
+            free: input.free,
+          },
+          captureStackTrace: false,
+        },
+      );
+
+      if (provider.apiKey.length === 0) {
+        return yield* new ConfigError({
           message:
             "error: no API key configured\nhint: set --api-key, add api_key to ~/.config/git-agent/config.yml, or use build-time embedded credentials",
-        }),
+        });
+      }
+
+      const repoRoot = yield* vcs.repoRoot(input.cwd);
+      const projectConfig =
+        (yield* Effect.withSpan(loadProjectConfig(repoRoot), "commit.load-project-config", {
+          attributes: {
+            vcs: vcsKind,
+          },
+          captureStackTrace: false,
+        })) ?? emptyProjectConfig();
+      const trailers = yield* parseTrailers(
+        input.coAuthor,
+        input.trailer,
+        !(provider.noGitAgentCoAuthor || projectConfig.noGitAgentCoAuthor || input.noAttribution),
+        provider.noModelCoAuthor || projectConfig.noModelCoAuthor,
       );
-    }
 
-    const repoRoot = yield* vcs.repoRoot(input.cwd);
-    const projectConfig = (yield* loadProjectConfig(repoRoot)) ?? emptyProjectConfig();
-    const trailers = yield* parseTrailers(
-      input.coAuthor,
-      input.trailer,
-      !(provider.noGitAgentCoAuthor || projectConfig.noGitAgentCoAuthor || input.noAttribution),
-      provider.noModelCoAuthor || projectConfig.noModelCoAuthor,
-    );
-
-    return yield* runCommitService({
-      cwd: repoRoot,
-      provider,
-      vcs,
-      projectConfig,
-      intent: toOptionalString(input.intent),
-      trailers,
-      dryRun: input.dryRun,
-      noStage: input.noStage,
-      amend: input.amend,
-      maxDiffLines: input.maxDiffLines > 0 ? input.maxDiffLines : projectConfig.maxDiffLines,
-    });
-  },
-  (effect, input) =>
-    withProgressSpan(effect, "commit.prepare-request", {
-      amend: input.amend,
-      dry_run: input.dryRun,
-      no_stage: input.noStage,
-      requested_vcs: toOptionalString(input.vcs) ?? "auto",
+      return yield* Effect.withSpan(
+        runCommitService({
+          cwd: repoRoot,
+          provider,
+          vcs,
+          projectConfig,
+          intent: toOptionalString(input.intent),
+          trailers,
+          dryRun: input.dryRun,
+          noStage: input.noStage,
+          amend: input.amend,
+          maxDiffLines: input.maxDiffLines > 0 ? input.maxDiffLines : projectConfig.maxDiffLines,
+        }),
+        "commit.run",
+        {
+          attributes: {
+            vcs: vcsKind,
+            dry_run: input.dryRun,
+            no_stage: input.noStage,
+            amend: input.amend,
+          },
+          captureStackTrace: false,
+        },
+      );
     }),
-);
+    "commit.prepare-request",
+    {
+      attributes: {
+        amend: input.amend,
+        dry_run: input.dryRun,
+        no_stage: input.noStage,
+        requested_vcs: requestedVcs,
+      },
+      captureStackTrace: false,
+    },
+  );
+};
 
 export const commandCommit = Command.make(
   "commit",

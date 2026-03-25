@@ -54,20 +54,22 @@ const callLlm = (config: ProviderConfig, system: string, user: string, maxTokens
     Effect.flatMap((text) =>
       text.length > 0
         ? Effect.succeed(text)
-        : Effect.fail(
-            new ApiError({
-              message: `LLM returned empty response (model=${config.model})`,
-            }),
+        : Effect.failSync(
+            () =>
+              new ApiError({
+                message: `LLM returned empty response (model=${config.model})`,
+              }),
           ),
     ),
     Effect.provide(makeLanguageModelLayer(config, maxTokens)),
     Effect.catch((cause) =>
       cause instanceof ApiError
-        ? Effect.fail(cause)
-        : Effect.fail(
-            new ApiError({
-              message: cause instanceof Error ? cause.message : String(cause),
-            }),
+        ? Effect.failSync(() => cause)
+        : Effect.failSync(
+            () =>
+              new ApiError({
+                message: cause instanceof Error ? cause.message : String(cause),
+              }),
           ),
     ),
   );
@@ -124,75 +126,70 @@ export interface GenerateCommitMessageInput {
   readonly previousMessage: string | undefined;
 }
 
-export const generateCommitMessage = ({
+export const generateCommitMessage = Effect.fn(function* ({
   provider,
   diff,
   intent,
   config,
   hookFeedback,
   previousMessage,
-}: GenerateCommitMessageInput) =>
-  Effect.gen(function* () {
-    const hasScopes = config.scopes.length > 0;
-    const systemPrompt =
-      previousMessage != null && hookFeedback != null
-        ? retrySystemPrompt
-        : hasScopes
-          ? generateSystemPromptScoped
-          : generateSystemPrompt;
+}: GenerateCommitMessageInput) {
+  const hasScopes = config.scopes.length > 0;
+  const systemPrompt =
+    previousMessage != null && hookFeedback != null
+      ? retrySystemPrompt
+      : hasScopes
+        ? generateSystemPromptScoped
+        : generateSystemPrompt;
 
-    const promptParts: Array<string> = [];
-    if (previousMessage != null && hookFeedback != null) {
-      promptParts.push(`Fix the following commit message:\n\n${previousMessage}`);
-      promptParts.push(`The commit hook rejected it for this reason:\n${hookFeedback}`);
-      promptParts.push(
-        "Rewrite the message to satisfy the requirement. Keep the semantic content unchanged.",
-      );
-    } else {
-      if (typeof intent === "string" && intent.trim().length > 0) {
-        promptParts.push(`PRIMARY DIRECTIVE - focus only on this: ${intent.trim()}`);
-      }
-      if (hasScopes) {
-        promptParts.push(
-          `REQUIRED scopes (use the most appropriate one):\n- ${formatScopes(config)}`,
-        );
-      }
-      promptParts.push(
-        `Git diff:\n<diff>\n${diff.content}\n</diff>\n\nStaged files: ${diff.files.join(", ")}`,
-      );
-      if (typeof hookFeedback === "string" && hookFeedback.trim().length > 0) {
-        promptParts.push(
-          `Previous attempt was rejected by the commit hook. Reason:\n${hookFeedback.trim()}`,
-        );
-      }
-    }
-
-    const raw = yield* callLlm(provider, systemPrompt, promptParts.join("\n\n"), 4096);
-    const parsed = parseJson<{ title?: string; bullets?: Array<string>; explanation?: string }>(
-      raw,
+  const promptParts: Array<string> = [];
+  if (previousMessage != null && hookFeedback != null) {
+    promptParts.push(`Fix the following commit message:\n\n${previousMessage}`);
+    promptParts.push(`The commit hook rejected it for this reason:\n${hookFeedback}`);
+    promptParts.push(
+      "Rewrite the message to satisfy the requirement. Keep the semantic content unchanged.",
     );
-
-    if (typeof parsed.title !== "string" || parsed.title.trim().length === 0) {
-      return yield* Effect.fail(
-        new ApiError({
-          message: "LLM returned empty commit message",
-          body: raw,
-        }),
+  } else {
+    if (typeof intent === "string" && intent.trim().length > 0) {
+      promptParts.push(`PRIMARY DIRECTIVE - focus only on this: ${intent.trim()}`);
+    }
+    if (hasScopes) {
+      promptParts.push(
+        `REQUIRED scopes (use the most appropriate one):\n- ${formatScopes(config)}`,
       );
     }
+    promptParts.push(
+      `Git diff:\n<diff>\n${diff.content}\n</diff>\n\nStaged files: ${diff.files.join(", ")}`,
+    );
+    if (typeof hookFeedback === "string" && hookFeedback.trim().length > 0) {
+      promptParts.push(
+        `Previous attempt was rejected by the commit hook. Reason:\n${hookFeedback.trim()}`,
+      );
+    }
+  }
 
-    return {
-      title: parsed.title.trim(),
-      bullets: Array.isArray(parsed.bullets)
-        ? parsed.bullets.filter(
-            (item): item is string => typeof item === "string" && item.trim().length > 0,
-          )
-        : [],
-      explanation: wrapExplanation(
-        typeof parsed.explanation === "string" ? parsed.explanation.trim() : "",
-      ),
-    } satisfies CommitMessage;
-  });
+  const raw = yield* callLlm(provider, systemPrompt, promptParts.join("\n\n"), 4096);
+  const parsed = parseJson<{ title?: string; bullets?: Array<string>; explanation?: string }>(raw);
+
+  if (typeof parsed.title !== "string" || parsed.title.trim().length === 0) {
+    return yield* new ApiError({
+      message: "LLM returned empty commit message",
+      body: raw,
+    });
+  }
+
+  return {
+    title: parsed.title.trim(),
+    bullets: Array.isArray(parsed.bullets)
+      ? parsed.bullets.filter(
+          (item): item is string => typeof item === "string" && item.trim().length > 0,
+        )
+      : [],
+    explanation: wrapExplanation(
+      typeof parsed.explanation === "string" ? parsed.explanation.trim() : "",
+    ),
+  } satisfies CommitMessage;
+});
 
 export interface PlanCommitsInput {
   readonly provider: ProviderConfig;
@@ -202,149 +199,140 @@ export interface PlanCommitsInput {
   readonly config: ProjectConfig;
 }
 
-export const planCommits = ({
+export const planCommits = Effect.fn(function* ({
   provider,
   stagedFiles,
   unstagedFiles,
   intent,
   config,
-}: PlanCommitsInput) =>
-  Effect.gen(function* () {
-    const hasScopes = config.scopes.length > 0;
-    const promptParts: Array<string> = [];
-    if (typeof intent === "string" && intent.trim().length > 0) {
-      promptParts.push(`PRIMARY DIRECTIVE - focus only on this: ${intent.trim()}`);
-    }
-    if (hasScopes) {
-      promptParts.push(
-        `REQUIRED scopes (use the most appropriate one per group):\n- ${formatScopes(config)}`,
-      );
-    }
-    if (stagedFiles.length > 0) {
-      promptParts.push(
-        `Staged files (already selected by user - keep as group 0):\n${stagedFiles.join("\n")}`,
-      );
-    }
-    if (unstagedFiles.length > 0) {
-      promptParts.push(`Unstaged files:\n${unstagedFiles.join("\n")}`);
-    }
-
-    const raw = yield* callLlm(
-      provider,
-      hasScopes ? planSystemPromptScoped : planSystemPrompt,
-      promptParts.join("\n\n"),
-      8192,
+}: PlanCommitsInput) {
+  const hasScopes = config.scopes.length > 0;
+  const promptParts: Array<string> = [];
+  if (typeof intent === "string" && intent.trim().length > 0) {
+    promptParts.push(`PRIMARY DIRECTIVE - focus only on this: ${intent.trim()}`);
+  }
+  if (hasScopes) {
+    promptParts.push(
+      `REQUIRED scopes (use the most appropriate one per group):\n- ${formatScopes(config)}`,
     );
+  }
+  if (stagedFiles.length > 0) {
+    promptParts.push(
+      `Staged files (already selected by user - keep as group 0):\n${stagedFiles.join("\n")}`,
+    );
+  }
+  if (unstagedFiles.length > 0) {
+    promptParts.push(`Unstaged files:\n${unstagedFiles.join("\n")}`);
+  }
 
-    const parsed = parseJson<{
-      groups?: Array<{
-        files?: Array<string>;
-        title?: string;
-        bullets?: Array<string>;
-        explanation?: string;
-      }>;
-    }>(raw, "groups");
+  const raw = yield* callLlm(
+    provider,
+    hasScopes ? planSystemPromptScoped : planSystemPrompt,
+    promptParts.join("\n\n"),
+    8192,
+  );
 
-    const groups =
-      parsed.groups?.map((group) => ({
-        files: Array.isArray(group.files)
-          ? group.files.filter(
-              (item): item is string => typeof item === "string" && item.trim().length > 0,
-            )
-          : [],
-        message:
-          typeof group.title === "string" && group.title.trim().length > 0
-            ? {
-                title: group.title.trim(),
-                bullets: Array.isArray(group.bullets)
-                  ? group.bullets.filter(
-                      (item): item is string => typeof item === "string" && item.trim().length > 0,
-                    )
-                  : [],
-                explanation: wrapExplanation(
-                  typeof group.explanation === "string" ? group.explanation.trim() : "",
-                ),
-              }
-            : undefined,
-      })) ?? [];
+  const parsed = parseJson<{
+    groups?: Array<{
+      files?: Array<string>;
+      title?: string;
+      bullets?: Array<string>;
+      explanation?: string;
+    }>;
+  }>(raw, "groups");
 
-    if (groups.length === 0) {
-      return yield* Effect.fail(
-        new ApiError({
-          message: "LLM returned empty plan",
-          body: raw,
-        }),
-      );
-    }
+  const groups =
+    parsed.groups?.map((group) => ({
+      files: Array.isArray(group.files)
+        ? group.files.filter(
+            (item): item is string => typeof item === "string" && item.trim().length > 0,
+          )
+        : [],
+      message:
+        typeof group.title === "string" && group.title.trim().length > 0
+          ? {
+              title: group.title.trim(),
+              bullets: Array.isArray(group.bullets)
+                ? group.bullets.filter(
+                    (item): item is string => typeof item === "string" && item.trim().length > 0,
+                  )
+                : [],
+              explanation: wrapExplanation(
+                typeof group.explanation === "string" ? group.explanation.trim() : "",
+              ),
+            }
+          : undefined,
+    })) ?? [];
 
-    return {
-      groups,
-    } satisfies CommitPlan;
-  });
+  if (groups.length === 0) {
+    return yield* new ApiError({
+      message: "LLM returned empty plan",
+      body: raw,
+    });
+  }
 
-export const detectTechnologies = (
+  return {
+    groups,
+  } satisfies CommitPlan;
+});
+
+export const detectTechnologies = Effect.fn(function* (
   provider: ProviderConfig,
   osName: string,
   dirs: ReadonlyArray<string>,
   files: ReadonlyArray<string>,
-) =>
-  Effect.gen(function* () {
-    const raw = yield* callLlm(
-      provider,
-      detectTechSystemPrompt,
-      `OS: ${osName}\n\nTop-level directories:\n${dirs.join("\n")}\n\nTracked files:\n${files.join("\n")}`,
-      1024,
-    );
-    const parsed = parseJson<{ technologies?: Array<string> }>(raw, "technologies");
-    const technologies =
-      parsed.technologies?.filter(
-        (item): item is string => typeof item === "string" && item.trim().length > 0,
-      ) ?? [];
-    if (technologies.length === 0) {
-      return yield* Effect.fail(
-        new ApiError({
-          message: "LLM returned empty technologies",
-          body: raw,
-        }),
-      );
-    }
-    return technologies;
-  });
+) {
+  const raw = yield* callLlm(
+    provider,
+    detectTechSystemPrompt,
+    `OS: ${osName}\n\nTop-level directories:\n${dirs.join("\n")}\n\nTracked files:\n${files.join("\n")}`,
+    1024,
+  );
+  const parsed = parseJson<{ technologies?: Array<string> }>(raw, "technologies");
+  const technologies =
+    parsed.technologies?.filter(
+      (item): item is string => typeof item === "string" && item.trim().length > 0,
+    ) ?? [];
+  if (technologies.length === 0) {
+    return yield* new ApiError({
+      message: "LLM returned empty technologies",
+      body: raw,
+    });
+  }
+  return technologies;
+});
 
-export const generateScopes = (
+export const generateScopes = Effect.fn(function* (
   provider: ProviderConfig,
   commits: ReadonlyArray<string>,
   dirs: ReadonlyArray<string>,
   files: ReadonlyArray<string>,
-) =>
-  Effect.gen(function* () {
-    const raw = yield* callLlm(
-      provider,
-      generateScopesSystemPrompt,
-      `Commit log (subject + changed files):\n${commits.join("\n---\n")}\n\nTop-level directories:\n${dirs.join("\n")}\n\nTracked files:\n${files.join("\n")}`,
-      8192,
-    );
-    const parsed = parseJson<{ scopes?: Array<ProjectScope> }>(raw, "scopes");
-    const scopes =
-      parsed.scopes?.filter(
-        (scope): scope is ProjectScope =>
-          typeof scope === "object" &&
-          scope != null &&
-          typeof scope.name === "string" &&
-          scope.name.trim().length > 0,
-      ) ?? [];
-    if (scopes.length === 0) {
-      return yield* Effect.fail(
-        new ApiError({
-          message: "LLM returned empty scopes",
-          body: raw,
-        }),
-      );
-    }
-    return scopes.map((scope) => ({
-      name: scope.name.trim(),
-      ...(typeof scope.description === "string" && scope.description.trim().length > 0
-        ? { description: scope.description.trim() }
-        : {}),
-    }));
-  });
+) {
+  const raw = yield* callLlm(
+    provider,
+    generateScopesSystemPrompt,
+    `Commit log (subject + changed files):\n${commits.join("\n---\n")}\n\nTop-level directories:\n${dirs.join("\n")}\n\nTracked files:\n${files.join("\n")}`,
+    8192,
+  );
+  const parsed = parseJson<{ scopes?: Array<ProjectScope> }>(raw, "scopes");
+  const scopes =
+    parsed.scopes?.filter(
+      (scope): scope is ProjectScope =>
+        typeof scope === "object" &&
+        scope != null &&
+        typeof scope.name === "string" &&
+        scope.name.trim().length > 0,
+    ) ?? [];
+  if (scopes.length === 0) {
+    return yield* new ApiError({
+      message: "LLM returned empty scopes",
+      body: raw,
+    });
+  }
+  return scopes.map((scope) => ({
+    name: scope.name.trim(),
+    ...(typeof scope.description === "string" && scope.description.trim().length > 0
+      ? { description: scope.description.trim() }
+      : {}),
+  }));
+});

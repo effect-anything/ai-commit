@@ -18,7 +18,7 @@ import {
 } from "../config/provider";
 import { localConfigPath, projectConfigWritePath, writeProjectField } from "../config/project";
 import { installHookValue } from "../services/hooks";
-import { detectVcs, getVcsClient } from "../services/vcs";
+import { Vcs } from "../services/vcs";
 import {
   apiKeyFlag,
   baseUrlFlag,
@@ -29,38 +29,45 @@ import {
   vcsFlag,
 } from "./shared";
 
-const outputResolvedProvider = (
+const outputResolvedProvider = Effect.fn(function* (
   cwd: string,
   vcs: "git" | "jj",
   apiKey: string | undefined,
   baseUrl: string | undefined,
   model: string | undefined,
   free: boolean,
-) =>
-  Effect.gen(function* () {
-    const config = yield* resolveProviderConfig({
+) {
+  const config = yield* Effect.withSpan(
+    resolveProviderConfig({
       cwd,
       vcs,
       apiKey,
       baseUrl,
       model,
       free,
-    });
-    const build = yield* readBuildProviderDefaults;
-    if (build.apiKey.length > 0 && config.apiKey === build.apiKey) {
-      yield* Console.log("mode: FREE (using built-in credentials)");
-      return;
-    }
-    const masked =
-      config.apiKey.length === 0
-        ? "(not set)"
-        : config.apiKey.length <= 4
-          ? "****"
-          : `${config.apiKey.slice(0, 4)}****`;
-    yield* Console.log(
-      `api_key:  ${masked}\nmodel:    ${config.model}\nbase_url: ${config.baseUrl}`,
-    );
-  });
+    }),
+    "config.resolve-provider",
+    {
+      attributes: {
+        vcs,
+        free,
+      },
+      captureStackTrace: false,
+    },
+  );
+  const build = yield* readBuildProviderDefaults;
+  if (build.apiKey.length > 0 && config.apiKey === build.apiKey) {
+    yield* Console.log("mode: FREE (using built-in credentials)");
+    return;
+  }
+  const masked =
+    config.apiKey.length === 0
+      ? "(not set)"
+      : config.apiKey.length <= 4
+        ? "****"
+        : `${config.apiKey.slice(0, 4)}****`;
+  yield* Console.log(`api_key:  ${masked}\nmodel:    ${config.model}\nbase_url: ${config.baseUrl}`);
+});
 
 const configShow = Command.make(
   "show",
@@ -73,7 +80,8 @@ const configShow = Command.make(
     free: freeFlag,
   },
   Effect.fn(function* (input) {
-    const vcsKind = yield* detectVcs(input.cwd, toOptionalString(input.vcs));
+    const vcsService = yield* Vcs;
+    const vcsKind = yield* vcsService.detect(input.cwd, toOptionalString(input.vcs));
     yield* outputResolvedProvider(
       input.cwd,
       vcsKind,
@@ -94,11 +102,21 @@ const configGet = Command.make(
   },
   Effect.fn(function* (input) {
     const key = resolveKey(input.key);
-    const vcsKind = yield* detectVcs(input.cwd, toOptionalString(input.vcs));
-    const vcs = getVcsClient(vcsKind);
+    const vcsService = yield* Vcs;
+    const { kind: vcsKind, client: vcs } = yield* vcsService.resolve(
+      input.cwd,
+      toOptionalString(input.vcs),
+    );
     const isRepo = yield* vcs.isRepo(input.cwd);
     const repoRoot = isRepo ? yield* vcs.repoRoot(input.cwd) : undefined;
-    const resolved = yield* resolveField(repoRoot, key);
+    const resolved = yield* Effect.withSpan(resolveField(repoRoot, key), "config.resolve-field", {
+      attributes: {
+        key,
+        vcs: vcsKind,
+        in_repo: isRepo,
+      },
+      captureStackTrace: false,
+    });
     if (resolved == null) {
       yield* Console.log(`${key} is not set`);
       return;
@@ -134,8 +152,8 @@ const configSet = Command.make(
       return;
     }
 
-    const vcsKind = yield* detectVcs(input.cwd, toOptionalString(input.vcs));
-    const vcs = getVcsClient(vcsKind);
+    const vcsService = yield* Vcs;
+    const { client: vcs } = yield* vcsService.resolve(input.cwd, toOptionalString(input.vcs));
     const repoRoot = yield* vcs.repoRoot(input.cwd);
     const prepared = yield* installHookValue(repoRoot, key, value);
     if (prepared.installedFrom != null) {
