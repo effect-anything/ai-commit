@@ -22,10 +22,12 @@ export interface MockLlmRequest {
 }
 
 export interface MockLlmResponse {
-  readonly content:
+  readonly content?:
     | string
     | Record<string, unknown>
     | ((request: MockLlmRequest) => string | Record<string, unknown>);
+  readonly headers?: Record<string, string>;
+  readonly status?: number;
 }
 
 export interface MockLlmServer {
@@ -203,12 +205,12 @@ export const runCli = (args: ReadonlyArray<string>, options: CliOptions) => {
     env: {
       PWD: options.cwd,
       XDG_CONFIG_HOME: isolatedConfigHome,
-      OPENAI_COMPACT_API_KEY: undefined,
-      OPENAI_COMPACT_API_BASE_URL: undefined,
-      OPENAI_COMPACT_MODEL: undefined,
-      GIT_AGENT_BUILD_API_KEY: undefined,
-      GIT_AGENT_BUILD_BASE_URL: undefined,
-      GIT_AGENT_BUILD_MODEL: undefined,
+      OPENAI_COMPACT_API_KEY: "",
+      OPENAI_COMPACT_API_BASE_URL: "",
+      OPENAI_COMPACT_MODEL: "",
+      GIT_AGENT_BUILD_API_KEY: "",
+      GIT_AGENT_BUILD_BASE_URL: "",
+      GIT_AGENT_BUILD_MODEL: "",
       ...options.env,
     },
   });
@@ -262,7 +264,21 @@ export const startMockLlmServer = (responses: ReadonlyArray<MockLlmResponse>) =>
 
         const content =
           typeof next.content === "function" ? next.content(requestInfo) : next.content;
-        response.writeHead(200, { "content-type": "application/json" });
+        const status = next.status ?? 200;
+        const headers = {
+          "content-type": "application/json",
+          ...next.headers,
+        };
+        if (status !== 200) {
+          response.writeHead(status, headers);
+          response.end(
+            typeof content === "string"
+              ? content
+              : JSON.stringify(content ?? { error: { message: "mock llm error" } }),
+          );
+          return;
+        }
+        response.writeHead(status, headers);
         const text = typeof content === "string" ? content : JSON.stringify(content);
         response.end(
           JSON.stringify({

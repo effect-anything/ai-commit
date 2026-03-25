@@ -628,6 +628,100 @@ describe.concurrent("CLI integration", () => {
     );
 
     it.effect(
+      "git commit retries transient llm failures in the http client layer",
+      Effect.fn(function* () {
+        const repo = yield* createGitRepo();
+        yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");
+        yield* gitCommitAll(repo, "chore: seed repo");
+        yield* writeTextFile(repo, "src/app.ts", "export const value = 'next';\n");
+        yield* gitCommitAll(repo, "feat(core): old message");
+
+        const llm = yield* startMockLlmServer([
+          {
+            status: 503,
+            content: {
+              error: {
+                message: "temporary upstream failure",
+              },
+            },
+          },
+          {
+            content: {
+              title: "fix(core): update app value",
+              bullets: ["Update app value output"],
+              explanation: "Updates the app value in the working tree.",
+            },
+          },
+        ]);
+
+        const result = yield* runCli(
+          [
+            "commit",
+            "--amend",
+            "--api-key",
+            "test-key",
+            "--base-url",
+            llm.baseUrl,
+            "--model",
+            "test-model",
+          ],
+          { cwd: repo },
+        );
+
+        expect(result.exitCode).toBe(0);
+        expect(llm.requests).toHaveLength(2);
+        expect((yield* git(repo, ["log", "-1", "--format=%s"])).stdout.trim()).toBe(
+          "fix(core): update app value",
+        );
+      }),
+    );
+
+    it.effect(
+      "git commit retries invalid llm json output",
+      Effect.fn(function* () {
+        const repo = yield* createGitRepo();
+        yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");
+        yield* gitCommitAll(repo, "chore: seed repo");
+        yield* writeTextFile(repo, "src/app.ts", "export const value = 'next';\n");
+        yield* gitCommitAll(repo, "feat(core): old message");
+
+        const llm = yield* startMockLlmServer([
+          {
+            content:
+              '{"title":"fix(core): update app value","bullets":["Update app value output"],"explanation":"Updates the app value"',
+          },
+          {
+            content: {
+              title: "fix(core): update app value",
+              bullets: ["Update app value output"],
+              explanation: "Updates the app value in the working tree.",
+            },
+          },
+        ]);
+
+        const result = yield* runCli(
+          [
+            "commit",
+            "--amend",
+            "--api-key",
+            "test-key",
+            "--base-url",
+            llm.baseUrl,
+            "--model",
+            "test-model",
+          ],
+          { cwd: repo },
+        );
+
+        expect(result.exitCode).toBe(0);
+        expect(llm.requests).toHaveLength(2);
+        expect((yield* git(repo, ["log", "-1", "--format=%s"])).stdout.trim()).toBe(
+          "fix(core): update app value",
+        );
+      }),
+    );
+
+    it.effect(
       "git commit exits with hook-blocked status after repeated conventional hook failures",
 
       Effect.fn(function* () {
