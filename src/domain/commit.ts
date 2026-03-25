@@ -39,6 +39,7 @@ export interface CommitPlan {
 
 export interface SingleCommitResult {
   readonly title: string;
+  readonly bullets: ReadonlyArray<string>;
   readonly explanation: string;
   readonly files: ReadonlyArray<string>;
   readonly output: string | undefined;
