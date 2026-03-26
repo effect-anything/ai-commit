@@ -1,6 +1,6 @@
 import { Option } from "effect";
 import { Flag } from "effect/unstable/cli";
-import { cwdEnvironment } from "../config/env";
+import { cwdEnvironment } from "../config/env.ts";
 
 export const cwdFlag = Flag.string("cwd").pipe(
   Flag.withFallbackConfig(cwdEnvironment),

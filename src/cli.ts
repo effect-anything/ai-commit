@@ -4,11 +4,11 @@ import { ConfigProvider, Effect, Layer } from "effect";
 import { CliError, Command } from "effect/unstable/cli";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import PackageJson from "../package.json" with { type: "json" };
-import { commandRoot } from "./commands/root";
-import { VcsLive } from "./services/vcs";
-import { renderError } from "./shared/errors";
-import { gitAgentProgressRenderConfig } from "./shared/progress-config";
-import { makeProgressLayer } from "./shared/tracing";
+import { commandRoot } from "./commands/root.ts";
+import { VcsLive } from "./services/vcs.ts";
+import { renderError } from "./shared/errors.ts";
+import { gitAgentProgressRenderConfig } from "./shared/progress-config.ts";
+import { makeProgressLayer } from "./shared/tracing.ts";
 
 const Live = Layer.mergeAll(
   NodeServices.layer,
