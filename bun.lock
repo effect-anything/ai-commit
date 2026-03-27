@@ -6,14 +6,14 @@
       "name": "@xesrevinu/npm-library-template",
       "devDependencies": {
         "@changesets/cli": "^2.29.7",
-        "@effect/ai-openai": "4.0.0-beta.31",
-        "@effect/platform-node": "4.0.0-beta.31",
+        "@effect/ai-openai": "4.0.0-beta.40",
+        "@effect/platform-node": "4.0.0-beta.40",
         "@effect/tsgo": "0.0.16",
-        "@effect/vitest": "4.0.0-beta.31",
+        "@effect/vitest": "4.0.0-beta.40",
         "@types/bun": "^1.3.10",
         "@types/node": "^24.5.2",
         "@typescript/native-preview": "7.0.0-dev.20260320.1",
-        "effect": "4.0.0-beta.31",
+        "effect": "4.0.0-beta.40",
         "lefthook": "^1.11.13",
         "oxfmt": "^0.38.0",
         "oxlint": "^1.53.0",
@@ -70,9 +70,9 @@
 
     "@changesets/write": ["@changesets/write@0.4.0", "", { "dependencies": { "@changesets/types": "^6.1.0", "fs-extra": "^7.0.1", "human-id": "^4.1.1", "prettier": "^2.7.1" } }, "sha512-CdTLvIOPiCNuH71pyDu3rA+Q0n65cmAbXnwWH84rKGiFumFzkmHNT8KHTMEchcxN+Kl8I54xGUhJ7l3E7X396Q=="],
 
-    "@effect/ai-openai": ["@effect/ai-openai@4.0.0-beta.31", "", { "peerDependencies": { "effect": "^4.0.0-beta.31" } }, "sha512-sjQ8oQp2ABiMe92M8uRRmVr8I2Hnuxu5CDcn/ZV6+fPup47bE7VVxZX1skD+qChqmLGsdjWNgGnwGI1v25tXjg=="],
+    "@effect/ai-openai": ["@effect/ai-openai@4.0.0-beta.40", "", { "peerDependencies": { "effect": "^4.0.0-beta.40" } }, "sha512-ArJsKFO2Uri2zNlGxtpShg27Ke/v+fEO/eHWOslHgbE46UJvTtBlV7atZbCrvlDIHb0Ho+WUs+Pd+VzTWh8plw=="],
 
-    "@effect/platform-node": ["@effect/platform-node@4.0.0-beta.31", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-beta.31", "mime": "^4.1.0", "undici": "^7.20.0" }, "peerDependencies": { "effect": "^4.0.0-beta.31", "ioredis": "^5.7.0" } }, "sha512-KmVZwGsQRBMZZYPJwpL2vj6sxjBzfXhyA8RgsH5/cmckDTsZpVTyqODQ/FFzmCnMWuYjZoJGPghTDrVVDn/6ZA=="],
+    "@effect/platform-node": ["@effect/platform-node@4.0.0-beta.40", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-beta.40", "mime": "^4.1.0", "undici": "^7.24.0" }, "peerDependencies": { "effect": "^4.0.0-beta.40", "ioredis": "^5.7.0" } }, "sha512-IRBlYErAdImh0Pv92PppgFK2wnNAv48Bib6FHjp+89tjzfZ0LHv5TQvEeCXo8ZgHJDyxiPJ5/ugV+jnzpZCG5Q=="],
 
     "@effect/platform-node-shared": ["@effect/platform-node-shared@4.0.0-beta.40", "", { "dependencies": { "@types/ws": "^8.18.1", "ws": "^8.19.0" }, "peerDependencies": { "effect": "^4.0.0-beta.40" } }, "sha512-WMRVG7T8ZDALKCOacsx2ZZj3Ccaoq8YGeD9q7ZL4q8RwQv8Nmrl+4+KZl95/zHCqXzgK9oUJOlBfQ7CZr6PQOQ=="],
 
@@ -92,7 +92,7 @@
 
     "@effect/tsgo-win32-x64": ["@effect/tsgo-win32-x64@0.0.16", "", { "os": "win32", "cpu": "x64" }, "sha512-g4txYhDc5t9dJGehuKEOIp9CJyYesbsi1uKjg0RNVT0VxtcUGGK61CxvIgwmcTecbALSdmv2fiwp58Ri0IlZuA=="],
 
-    "@effect/vitest": ["@effect/vitest@4.0.0-beta.31", "", { "peerDependencies": { "effect": "^4.0.0-beta.31", "vitest": "^3.0.0 || ^4.0.0" } }, "sha512-ZUhOJ3KNocpPDCl+127RBhfpHQTJlQUoKgMw7JPUK0SdA1ku1XFcVqFTAWwJudoUmp66ZtYM98C4hzn6UDW7bA=="],
+    "@effect/vitest": ["@effect/vitest@4.0.0-beta.40", "", { "peerDependencies": { "effect": "^4.0.0-beta.40", "vitest": "^3.0.0 || ^4.0.0" } }, "sha512-75LElHTQLlDVAKPB0C8h1w1GG/wrWGB5DosgnSiz4s1PUM5t/5crqaWhl02B41bzCXJ8e1TJW7Mq77ItAaEfRQ=="],
 
     "@emnapi/core": ["@emnapi/core@1.9.0", "", { "dependencies": { "@emnapi/wasi-threads": "1.2.0", "tslib": "^2.4.0" } }, "sha512-0DQ98G9ZQZOxfUcQn1waV2yS8aWdZ6kJMbYCJB3oUBecjWYO1fqJ+a1DRfPF3O5JEkwqwP1A9QEN/9mYm2Yd0w=="],
 
@@ -350,7 +350,7 @@
 
     "dts-resolver": ["dts-resolver@2.1.3", "", { "peerDependencies": { "oxc-resolver": ">=11.0.0" }, "optionalPeers": ["oxc-resolver"] }, "sha512-bihc7jPC90VrosXNzK0LTE2cuLP6jr0Ro8jk+kMugHReJVLIpHz/xadeq3MhuwyO4TD4OA3L1Q8pBBFRc08Tsw=="],
 
-    "effect": ["effect@4.0.0-beta.31", "", { "dependencies": { "@standard-schema/spec": "^1.1.0", "fast-check": "^4.5.3", "find-my-way-ts": "^0.1.6", "ini": "^6.0.0", "kubernetes-types": "^1.30.0", "msgpackr": "^1.11.8", "multipasta": "^0.2.7", "toml": "^3.0.0", "uuid": "^13.0.0", "yaml": "^2.8.2" } }, "sha512-w3QwJnlaLtWWiUSzhCXUTIisnULPsxLzpO6uqaBFjXybKx6FvCqsLJT6v4dV7G9eA9jeTtG6Gv7kF+jGe3HxzA=="],
+    "effect": ["effect@4.0.0-beta.40", "", { "dependencies": { "@standard-schema/spec": "^1.1.0", "fast-check": "^4.5.3", "find-my-way-ts": "^0.1.6", "ini": "^6.0.0", "kubernetes-types": "^1.30.0", "msgpackr": "^1.11.8", "multipasta": "^0.2.7", "toml": "^3.0.0", "uuid": "^13.0.0", "yaml": "^2.8.2" } }, "sha512-GA7Q1TglPIrEjg/Dtj3AvXbyh00A4sAXgu3JGDUHRPZ4hxMRC5CMAsCzCH0140zetRMpe7LOH8uVi5gb4t/8oQ=="],
 
     "empathic": ["empathic@2.0.0", "", {}, "sha512-i6UzDscO/XfAcNYD75CfICkmfLedpyPDdozrLMmQc5ORaQcdMoc21OnlEylMIqI7U8eniKrPMxxtj8k0vhmJhA=="],
 
