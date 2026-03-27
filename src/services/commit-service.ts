@@ -229,12 +229,12 @@ export interface CommitPlannerServiceShape {
 export class CommitMessageService extends ServiceMap.Service<
   CommitMessageService,
   CommitMessageServiceShape
->()("@git-agent/CommitMessageService") {}
+>()("@ai-commit/CommitMessageService") {}
 
 export class CommitPlannerService extends ServiceMap.Service<
   CommitPlannerService,
   CommitPlannerServiceShape
->()("@git-agent/CommitPlannerService") {}
+>()("@ai-commit/CommitPlannerService") {}
 
 const splitDiffSections = (content: string): Array<string> => {
   if (content.trim().length === 0) {
@@ -406,7 +406,7 @@ export interface CommitServiceShape {
 }
 
 export class CommitService extends ServiceMap.Service<CommitService, CommitServiceShape>()(
-  "@git-agent/CommitService",
+  "@ai-commit/CommitService",
 ) {}
 
 export const CommitMessageServiceLive = Layer.effect(

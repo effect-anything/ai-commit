@@ -12,7 +12,7 @@ export const ProjectConfig = Schema.Struct({
   scopes: Schema.Array(ProjectScope),
   hooks: Schema.Array(NonEmptyTrimmedString),
   maxDiffLines: Schema.Int,
-  noGitAgentCoAuthor: Schema.Boolean,
+  noCommitCoAuthor: Schema.Boolean,
   noModelCoAuthor: Schema.Boolean,
 });
 
@@ -22,6 +22,6 @@ export const emptyProjectConfig = (): ProjectConfig => ({
   scopes: [],
   hooks: [],
   maxDiffLines: 0,
-  noGitAgentCoAuthor: false,
+  noCommitCoAuthor: false,
   noModelCoAuthor: false,
 });

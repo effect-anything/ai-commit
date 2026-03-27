@@ -144,27 +144,32 @@ const decodeHooks = Effect.fn(function* (pathValue: string, rawMap: RawYamlMap) 
   return [] as Array<string>;
 });
 
-const gitAgentPath = Effect.fn(function* (repoRoot: string, ...segments: ReadonlyArray<string>) {
+const gitConfigPathPath = Effect.fn(function* (
+  repoRoot: string,
+  ...segments: ReadonlyArray<string>
+) {
   const path = yield* Path.Path;
-  return path.join(repoRoot, ".git-agent", ...segments);
+  return path.join(repoRoot, ".ai-commit", ...segments);
 });
 
 export const projectConfigPath = Effect.fn(function* (repoRoot: string) {
   const fs = yield* FileSystem.FileSystem;
-  const currentPath = yield* gitAgentPath(repoRoot, "config.yml");
+  const currentPath = yield* gitConfigPathPath(repoRoot, "config.yml");
   if (yield* fs.exists(currentPath)) {
     return currentPath;
   }
-  const legacyPath = yield* gitAgentPath(repoRoot, "project.yml");
+  const legacyPath = yield* gitConfigPathPath(repoRoot, "project.yml");
   if (yield* fs.exists(legacyPath)) {
     return legacyPath;
   }
   return currentPath;
 });
 
-export const projectConfigWritePath = (repoRoot: string) => gitAgentPath(repoRoot, "config.yml");
+export const projectConfigWritePath = (repoRoot: string) =>
+  gitConfigPathPath(repoRoot, "config.yml");
 
-export const localConfigPath = (repoRoot: string) => gitAgentPath(repoRoot, "config.local.yml");
+export const localConfigPath = (repoRoot: string) =>
+  gitConfigPathPath(repoRoot, "config.local.yml");
 
 export const loadProjectConfig = Effect.fn("Config.LoadProjectConfig")(function* (
   repoRoot: string,
@@ -193,21 +198,21 @@ export const loadProjectConfig = Effect.fn("Config.LoadProjectConfig")(function*
   const mergedHooks = localHooks.length > 0 ? localHooks : projectHooks;
   const maxDiffLines = localMaxDiffLines ?? projectMaxDiffLines ?? 0;
   const [
-    localNoGitAgentCoAuthor,
-    projectNoGitAgentCoAuthor,
+    localNoCommitCoAuthor,
+    projectNoCommitCoAuthor,
     localNoModelCoAuthor,
     projectNoModelCoAuthor,
   ] = yield* Effect.all([
     decodeConfigField(
       localPath,
-      "no_git_agent_co_author",
-      localRaw["no_git_agent_co_author"],
+      "no-commit-co-author",
+      localRaw["no-commit-co-author"],
       Schema.Boolean,
     ),
     decodeConfigField(
       projectPath,
-      "no_git_agent_co_author",
-      projectRaw["no_git_agent_co_author"],
+      "no-commit-co-author",
+      projectRaw["no-commit-co-author"],
       Schema.Boolean,
     ),
     decodeConfigField(
@@ -223,14 +228,14 @@ export const loadProjectConfig = Effect.fn("Config.LoadProjectConfig")(function*
       Schema.Boolean,
     ),
   ]);
-  const noGitAgentCoAuthor = localNoGitAgentCoAuthor ?? projectNoGitAgentCoAuthor ?? false;
+  const noCommitCoAuthor = localNoCommitCoAuthor ?? projectNoCommitCoAuthor ?? false;
   const noModelCoAuthor = localNoModelCoAuthor ?? projectNoModelCoAuthor ?? false;
 
   if (
     mergedScopes.length === 0 &&
     mergedHooks.length === 0 &&
     maxDiffLines === 0 &&
-    noGitAgentCoAuthor === false &&
+    noCommitCoAuthor === false &&
     noModelCoAuthor === false
   ) {
     return undefined as ProjectConfig | undefined;
@@ -240,7 +245,7 @@ export const loadProjectConfig = Effect.fn("Config.LoadProjectConfig")(function*
     scopes: mergedScopes,
     hooks: mergedHooks,
     maxDiffLines,
-    noGitAgentCoAuthor,
+    noCommitCoAuthor,
     noModelCoAuthor,
   } satisfies ProjectConfig;
 });

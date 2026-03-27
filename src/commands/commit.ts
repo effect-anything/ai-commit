@@ -52,7 +52,7 @@ const parseTrailers = Effect.fn("Commit.ParseTrailers")(function* (
   if (includeAttribution) {
     trailers.push({
       key: "Co-Authored-By",
-      value: "Git Agent <noreply@git-agent.dev>",
+      value: "Ai Commit <41898282+github-actions[bot]@users.noreply.github.com>",
     });
   }
 
@@ -83,8 +83,8 @@ export const commandCommit = Command.make(
       Flag.withDescription("Maximum diff lines to send to the model. 0 means unlimited."),
     ),
     noAttribution: Flag.boolean("no-attribution").pipe(
-      Flag.withAlias("--no-git-agent"),
-      Flag.withDescription("Omit the default Git Agent trailer."),
+      Flag.withAlias("--no-ai-commit"),
+      Flag.withDescription("Omit the default AI Commit trailer."),
     ),
     coAuthor: Flag.string("co-author").pipe(
       Flag.withDescription("Co-author trailer. Repeat the flag or use comma-separated values."),
@@ -130,7 +130,7 @@ export const commandCommit = Command.make(
     if (provider.apiKey.length === 0) {
       return yield* new ConfigError({
         message:
-          "no API key configured (hint: set --api-key, add api_key to ~/.config/git-agent/config.yml, or use build-time embedded credentials)",
+          "no API key configured (hint: set --api-key, add api_key to ~/.config/ai-commit/config.yml, or use build-time embedded credentials)",
       });
     }
 
@@ -140,7 +140,7 @@ export const commandCommit = Command.make(
     const trailers = yield* parseTrailers(
       input.coAuthor,
       input.trailer,
-      !(provider.noGitAgentCoAuthor || projectConfig.noGitAgentCoAuthor || input.noAttribution),
+      !(provider.noCommitCoAuthor || projectConfig.noCommitCoAuthor || input.noAttribution),
       provider.noModelCoAuthor || projectConfig.noModelCoAuthor,
     );
 

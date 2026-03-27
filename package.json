@@ -1,7 +1,7 @@
 {
   "name": "@effect-x/ai-commit",
   "version": "0.0.1",
-  "description": "Effect rewrite of git-agent with git and jj support.",
+  "description": "AI commit cli with git and jj support.",
   "keywords": [
     "cli",
     "commit",
@@ -11,9 +11,9 @@
     "jujutsu",
     "llm"
   ],
-  "homepage": "https://github.com/effect-anything/git-agent-cli#readme",
+  "homepage": "https://github.com/effect-anything/ai-commit",
   "bugs": {
-    "url": "https://github.com/effect-anything/git-agent-cli/issues"
+    "url": "https://github.com/effect-anything/ai-commit/issues"
   },
   "license": "MIT",
   "contributors": [
@@ -21,7 +21,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/effect-anything/git-agent-cli.git"
+    "url": "git+https://github.com/effect-anything/ai-commit.git"
   },
   "bin": {
     "ai-commit": "dist/cli.js"

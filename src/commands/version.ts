@@ -8,4 +8,4 @@ export const commandVersion = Command.make(
   Effect.fn(function* () {
     yield* Console.log(PackageJson.version);
   }),
-).pipe(Command.withDescription("Print the git-agent version."));
+).pipe(Command.withDescription("Print the ai-commit version."));

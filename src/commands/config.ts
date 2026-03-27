@@ -138,6 +138,6 @@ const configSet = Command.make(
 ).pipe(Command.withDescription("Write a configuration value."));
 
 export const commandConfig = Command.make("config").pipe(
-  Command.withDescription("Manage git-agent configuration."),
+  Command.withDescription("Manage ai-commit configuration."),
   Command.withSubcommands([configShow, configGet, configSet]),
 );

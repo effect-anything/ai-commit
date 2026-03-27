@@ -22,9 +22,9 @@ import { extractJson } from "../shared/text.ts";
 import { LlmClient } from "./openai-client.ts";
 import type { VcsClient } from "./vcs.ts";
 
-const autoGenStart = "### git-agent auto-generated — DO NOT EDIT this block ###";
-const legacyAutoGenStart = "### git-agent auto-generated - DO NOT EDIT this block ###";
-const autoGenEnd = "### end git-agent ###";
+const autoGenStart = "### ai-commit auto-generated — DO NOT EDIT this block ###";
+const legacyAutoGenStart = "### ai-commit auto-generated - DO NOT EDIT this block ###";
+const autoGenEnd = "### end ai-commit ###";
 const customSection = "### custom rules ###";
 
 const detectTechSystemPrompt =
@@ -201,7 +201,7 @@ export interface GitignoreServiceShape {
 }
 
 export class GitignoreService extends ServiceMap.Service<GitignoreService, GitignoreServiceShape>()(
-  "@git-agent/GitignoreService",
+  "@ai-commit/GitignoreService",
 ) {}
 
 export const GitignoreServiceLive = Layer.effect(

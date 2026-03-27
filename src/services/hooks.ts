@@ -62,7 +62,7 @@ export interface HookServiceShape {
 }
 
 export class HookService extends ServiceMap.Service<HookService, HookServiceShape>()(
-  "@git-agent/HookService",
+  "@ai-commit/HookService",
 ) {}
 
 export const HookServiceLive = Layer.effect(
@@ -176,7 +176,7 @@ export const HookServiceLive = Layer.effect(
             }),
         ),
       );
-      const destination = path.join(repoRoot, ".git-agent", "hooks", "pre-commit");
+      const destination = path.join(repoRoot, ".ai-commit", "hooks", "pre-commit");
 
       yield* fs.makeDirectory(path.dirname(destination), { recursive: true }).pipe(
         Effect.mapError(

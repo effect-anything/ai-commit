@@ -42,7 +42,7 @@ export const commandInit = Command.make(
       Flag.withDescription("Maximum commit count to analyze for scopes."),
     ),
     local: Flag.boolean("local").pipe(
-      Flag.withDescription("Write config to .git-agent/config.local.yml."),
+      Flag.withDescription("Write config to .ai-commit/config.local.yml."),
     ),
     hook: Flag.string("hook").pipe(
       Flag.withDescription("Hook to configure. Repeat the flag or use comma-separated values."),
@@ -111,7 +111,7 @@ export const commandInit = Command.make(
     if ((doGitignore || doScope || fullWizard) && provider.apiKey.length === 0) {
       return yield* new ConfigError({
         message:
-          "no API key configured (hint: set --api-key or add api_key to ~/.config/git-agent/config.yml)",
+          "no API key configured (hint: set --api-key or add api_key to ~/.config/ai-commit/config.yml)",
       });
     }
 
@@ -154,4 +154,4 @@ export const commandInit = Command.make(
       yield* mergeScopes(configPath, emptyProjectConfig().scopes);
     }
   }),
-).pipe(Command.withDescription("Initialize git-agent in the current repository."));
+).pipe(Command.withDescription("Initialize ai-commit in the current repository."));

@@ -117,7 +117,7 @@ export interface ScopeServiceShape {
 }
 
 export class ScopeService extends ServiceMap.Service<ScopeService, ScopeServiceShape>()(
-  "@git-agent/ScopeService",
+  "@ai-commit/ScopeService",
 ) {}
 
 export const ScopeServiceLive = Layer.effect(

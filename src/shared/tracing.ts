@@ -804,7 +804,7 @@ class ProgressTreeRenderer implements ProgressLoggerService {
 }
 
 export class ProgressLogger extends ServiceMap.Service<ProgressLogger, ProgressLoggerService>()(
-  "@git-agent/ProgressLogger",
+  "@ai-commit/ProgressLogger",
 ) {}
 
 export const ProgressLoggerLive = Layer.effect(

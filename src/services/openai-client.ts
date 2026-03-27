@@ -69,7 +69,7 @@ export interface LlmClientService {
 }
 
 export class LlmClient extends ServiceMap.Service<LlmClient, LlmClientService>()(
-  "@git-agent/LlmClient",
+  "@ai-commit/LlmClient",
 ) {}
 
 export const LlmClientLive = Layer.effect(

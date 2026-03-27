@@ -20,7 +20,7 @@ const keyRegistry: Record<string, KeyDef> = {
   scopes: { type: "stringslice", allowProject: true, allowLocal: true },
   hook: { type: "stringslice", allowProject: true, allowLocal: true },
   max_diff_lines: { type: "int", allowProject: true, allowLocal: true },
-  no_git_agent_co_author: { type: "bool", allowUser: true, allowProject: true, allowLocal: true },
+  no_commit_co_author: { type: "bool", allowUser: true, allowProject: true, allowLocal: true },
   no_model_co_author: { type: "bool", allowUser: true, allowProject: true, allowLocal: true },
 };
 
@@ -28,7 +28,7 @@ const keyAliases: Record<string, string> = {
   "api-key": "api_key",
   "base-url": "base_url",
   "max-diff-lines": "max_diff_lines",
-  "no-git-agent-co-author": "no_git_agent_co_author",
+  "no-commit-co-author": "no_commit_co_author",
   "no-model-co-author": "no_model_co_author",
 };
 

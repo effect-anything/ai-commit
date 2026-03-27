@@ -212,7 +212,7 @@ export interface VcsService {
   ) => Effect.Effect<ResolvedVcs, ProcessExecutionError>;
 }
 
-export class GitClient extends ServiceMap.Service<GitClient, VcsClient>()("@git-agent/GitClient") {}
+export class GitClient extends ServiceMap.Service<GitClient, VcsClient>()("@ai-commit/GitClient") {}
 
 export const GitClientLive = Layer.effect(
   GitClient,
@@ -534,7 +534,7 @@ export const GitClientLive = Layer.effect(
   }),
 );
 
-export class JjClient extends ServiceMap.Service<JjClient, VcsClient>()("@git-agent/JjClient") {}
+export class JjClient extends ServiceMap.Service<JjClient, VcsClient>()("@ai-commit/JjClient") {}
 
 export const JjClientLive = Layer.effect(
   JjClient,
@@ -854,7 +854,7 @@ export const JjClientLive = Layer.effect(
   }),
 );
 
-export class Vcs extends ServiceMap.Service<Vcs, VcsService>()("@git-agent/Vcs") {}
+export class Vcs extends ServiceMap.Service<Vcs, VcsService>()("@ai-commit/Vcs") {}
 
 export const VcsLive = Layer.effect(
   Vcs,

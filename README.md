@@ -26,7 +26,7 @@ DESCRIPTION
   AI-first Git/JJ CLI for atomic commits and generated messages.
 
 USAGE
-  git-agent <subcommand> [flags]
+  ai-commit <subcommand> [flags]
 
 GLOBAL FLAGS
   --help, -h              Show help information
@@ -36,9 +36,9 @@ GLOBAL FLAGS
 
 SUBCOMMANDS
   commit     Generate and create commit(s) with AI-generated messages.
-  config     Manage git-agent configuration.
-  init       Initialize git-agent in the current repository.
-  version    Print the git-agent version.
+  config     Manage ai-commit configuration.
+  init       Initialize ai-commit in the current repository.
+  version    Print the ai-commit version.
 ```
 
 ## Goals

@@ -18,7 +18,7 @@ export const ProviderConfig = Schema.Struct({
   apiKey: Schema.String,
   baseUrl: Schema.String,
   model: Schema.String,
-  noGitAgentCoAuthor: Schema.Boolean,
+  noCommitCoAuthor: Schema.Boolean,
   noModelCoAuthor: Schema.Boolean,
 });
 
@@ -54,7 +54,7 @@ const FileConfig = Schema.Struct({
   api_key: Schema.optionalKey(ExpandEnvString.pipe(Schema.UndefinedOr)),
   base_url: Schema.optionalKey(ExpandEnvString.pipe(Schema.UndefinedOr)),
   model: Schema.optionalKey(ExpandEnvString.pipe(Schema.UndefinedOr)),
-  no_git_agent_co_author: Schema.optionalKey(Schema.Boolean.pipe(Schema.UndefinedOr)),
+  no_commit_co_author: Schema.optionalKey(Schema.Boolean.pipe(Schema.UndefinedOr)),
   no_model_co_author: Schema.optionalKey(Schema.Boolean.pipe(Schema.UndefinedOr)),
 });
 
@@ -86,9 +86,9 @@ export const userConfigPath = Effect.gen(function* () {
   });
 
   if (xdgConfigHome != null) {
-    return path.join(xdgConfigHome, "git-agent", "config.yml");
+    return path.join(xdgConfigHome, "ai-commit", "config.yml");
   }
-  return path.join(homedir(), ".config", "git-agent", "config.yml");
+  return path.join(homedir(), ".config", "ai-commit", "config.yml");
 });
 
 const expandEnv = Effect.fn(function* (value: string) {
@@ -149,7 +149,7 @@ const readGitConfig = (cwd: string, key: string) =>
   Effect.map(
     runProcess({
       command: "git",
-      args: ["config", "--local", "--get", `git-agent.${key}`],
+      args: ["config", "--local", "--get", `ai-commit.${key}`],
       cwd,
       allowFailure: true,
     }),
@@ -173,7 +173,7 @@ export const resolveProviderConfig = Effect.fn("Config.ResolveProvider")(functio
     apiKey: firstNonEmpty(apiKey, file.api_key, build.apiKey) ?? "",
     baseUrl: firstNonEmpty(baseUrl, gitBaseUrl, file.base_url, build.baseUrl) ?? DefaultBaseUrl,
     model: firstNonEmpty(model, gitModel, file.model, build.model) ?? DefaultModel,
-    noGitAgentCoAuthor: file.no_git_agent_co_author ?? false,
+    noCommitCoAuthor: file.no_commit_co_author ?? false,
     noModelCoAuthor: file.no_model_co_author ?? false,
   } satisfies ProviderConfig;
 });
