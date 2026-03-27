@@ -22,15 +22,12 @@ const readPreferredEnv = Effect.fn(function* (names: ReadonlyArray<string>, fall
 });
 
 export const buildEnvironment = Effect.gen(function* () {
-  const apiKey = yield* readPreferredEnv(["OPENAI_COMPACT_API_KEY", "GIT_AGENT_BUILD_API_KEY"], "");
+  const apiKey = yield* readPreferredEnv(["OPENAI_API_KEY", "GIT_AGENT_BUILD_API_KEY"], "");
   const baseUrl = yield* readPreferredEnv(
-    ["OPENAI_COMPACT_API_BASE_URL", "GIT_AGENT_BUILD_BASE_URL"],
+    ["OPENAI_API_BASE_URL", "GIT_AGENT_BUILD_BASE_URL"],
     DefaultBaseUrl,
   );
-  const model = yield* readPreferredEnv(
-    ["OPENAI_COMPACT_MODEL", "GIT_AGENT_BUILD_MODEL"],
-    DefaultModel,
-  );
+  const model = yield* readPreferredEnv(["OPENAI_MODEL", "GIT_AGENT_BUILD_MODEL"], DefaultModel);
   const gitignoreBaseUrl = yield* envStringWithDefault(
     "GIT_AGENT_GITIGNORE_BASE_URL",
     DefaultGitignoreBaseUrl,
