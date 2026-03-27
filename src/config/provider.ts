@@ -1,35 +1,64 @@
 import { homedir } from "node:os";
-import { Effect, FileSystem, Option, Path } from "effect";
+import {
+  Effect,
+  FileSystem,
+  Option,
+  Path,
+  Schema,
+  SchemaIssue,
+  SchemaTransformation,
+} from "effect";
 import { parse, stringify } from "yaml";
-import { ConfigError } from "../shared/errors";
-import { runProcess } from "../shared/process";
-import { buildEnvironment, DefaultBaseUrl, DefaultModel, envOptionalString } from "./env";
-import { localConfigPath, projectConfigPath, readProjectField } from "./project";
+import { ConfigError } from "../shared/errors.ts";
+import { runProcess } from "../shared/process.ts";
+import { buildEnvironment, DefaultBaseUrl, DefaultModel, envOptionalString } from "./env.ts";
+import { localConfigPath, projectConfigPath, readProjectField } from "./project.ts";
 
-export interface ProviderConfig {
-  readonly apiKey: string;
-  readonly baseUrl: string;
-  readonly model: string;
-  readonly noGitAgentCoAuthor: boolean;
-  readonly noModelCoAuthor: boolean;
-}
+export const ProviderConfig = Schema.Struct({
+  apiKey: Schema.String,
+  baseUrl: Schema.String,
+  model: Schema.String,
+  noGitAgentCoAuthor: Schema.Boolean,
+  noModelCoAuthor: Schema.Boolean,
+});
+
+export type ProviderConfig = typeof ProviderConfig.Type;
 
 export interface ProviderConfigInput {
   readonly cwd: string;
   readonly apiKey: string | undefined;
   readonly baseUrl: string | undefined;
   readonly model: string | undefined;
-  readonly free: boolean | undefined;
   readonly vcs: "git" | "jj" | undefined;
 }
 
-interface FileConfig {
-  api_key?: string;
-  base_url?: string;
-  model?: string;
-  no_git_agent_co_author?: boolean;
-  no_model_co_author?: boolean;
-}
+const ExpandEnvString = Schema.String.pipe(
+  Schema.decodeTo(
+    Schema.String,
+    SchemaTransformation.transformOrFail({
+      decode: (value) =>
+        expandEnv(value).pipe(
+          Effect.mapError(
+            (cause) =>
+              new SchemaIssue.InvalidValue(Option.some(value), {
+                message: cause instanceof Error ? cause.message : String(cause),
+              }),
+          ),
+        ),
+      encode: (value) => Effect.succeed(value),
+    }),
+  ),
+);
+
+const FileConfig = Schema.Struct({
+  api_key: Schema.optionalKey(ExpandEnvString.pipe(Schema.UndefinedOr)),
+  base_url: Schema.optionalKey(ExpandEnvString.pipe(Schema.UndefinedOr)),
+  model: Schema.optionalKey(ExpandEnvString.pipe(Schema.UndefinedOr)),
+  no_git_agent_co_author: Schema.optionalKey(Schema.Boolean.pipe(Schema.UndefinedOr)),
+  no_model_co_author: Schema.optionalKey(Schema.Boolean.pipe(Schema.UndefinedOr)),
+});
+
+type FileConfig = typeof FileConfig.Type;
 
 const readEnvVar = Effect.fn(function* (name: string) {
   const value = yield* envOptionalString(name);
@@ -90,7 +119,8 @@ const readUserConfig = Effect.fn(function* () {
     Effect.mapError(
       (cause) =>
         new ConfigError({
-          message: `failed to read user config: ${cause.message}`,
+          message: "failed to read user config",
+          cause,
         }),
     ),
   );
@@ -99,31 +129,20 @@ const readUserConfig = Effect.fn(function* () {
     try: () => parse(text),
     catch: (cause) =>
       new ConfigError({
-        message: `failed to read user config: ${cause instanceof Error ? cause.message : String(cause)}`,
+        message: "failed to read user config",
+        cause,
       }),
   });
-  if (typeof raw !== "object" || raw == null) {
-    return {} satisfies FileConfig;
-  }
 
-  const file = raw as FileConfig;
-  const expanded: FileConfig = {};
-  if (typeof file.api_key === "string") {
-    expanded.api_key = yield* expandEnv(file.api_key);
-  }
-  if (typeof file.base_url === "string") {
-    expanded.base_url = yield* expandEnv(file.base_url);
-  }
-  if (typeof file.model === "string") {
-    expanded.model = yield* expandEnv(file.model);
-  }
-  if (typeof file.no_git_agent_co_author === "boolean") {
-    expanded.no_git_agent_co_author = file.no_git_agent_co_author;
-  }
-  if (typeof file.no_model_co_author === "boolean") {
-    expanded.no_model_co_author = file.no_model_co_author;
-  }
-  return expanded;
+  return yield* Schema.decodeUnknownEffect(FileConfig)(raw).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ConfigError({
+          message: "failed to read user config",
+          cause,
+        }),
+    ),
+  );
 });
 
 const readGitConfig = (cwd: string, key: string) =>
@@ -137,25 +156,14 @@ const readGitConfig = (cwd: string, key: string) =>
     (result) => (result.exitCode === 0 ? result.stdout.trim() : ""),
   );
 
-export const resolveProviderConfig = Effect.fn(function* ({
+export const resolveProviderConfig = Effect.fn("Config.ResolveProvider")(function* ({
   cwd,
   apiKey,
   baseUrl,
   model,
-  free = false,
   vcs,
 }: ProviderConfigInput) {
   const build = yield* readBuildProviderDefaults;
-
-  if (free) {
-    return {
-      apiKey: build.apiKey,
-      baseUrl: build.baseUrl,
-      model: build.model,
-      noGitAgentCoAuthor: false,
-      noModelCoAuthor: false,
-    } satisfies ProviderConfig;
-  }
 
   const file = yield* readUserConfig();
   const gitModel = vcs === "git" ? yield* readGitConfig(cwd, "model") : "";
@@ -170,7 +178,12 @@ export const resolveProviderConfig = Effect.fn(function* ({
   } satisfies ProviderConfig;
 });
 
-export const resolveField = Effect.fn(function* (repoRoot: string | undefined, key: string) {
+export const resolveField = Effect.fn("Config.ResolveField")(function* (
+  repoRoot: string | undefined,
+  key: string,
+) {
+  yield* Effect.annotateCurrentSpan({ key });
+
   if (key === "api_key" || key === "base_url" || key === "model") {
     const userValue = yield* readUserField(key);
     return userValue == null ? undefined : { value: userValue, scope: "user" as const };
@@ -214,7 +227,8 @@ export const writeUserField = Effect.fn(function* (key: string, value: string) {
       Effect.mapError(
         (cause) =>
           new ConfigError({
-            message: `failed to write user config: ${cause.message}`,
+            message: "failed to write user config",
+            cause,
           }),
       ),
     );
@@ -222,7 +236,8 @@ export const writeUserField = Effect.fn(function* (key: string, value: string) {
       try: () => parse(existing),
       catch: (cause) =>
         new ConfigError({
-          message: `failed to write user config: ${cause instanceof Error ? cause.message : String(cause)}`,
+          message: "failed to write user config",
+          cause,
         }),
     });
     if (typeof parsed === "object" && parsed != null) {
@@ -236,7 +251,8 @@ export const writeUserField = Effect.fn(function* (key: string, value: string) {
     Effect.mapError(
       (cause) =>
         new ConfigError({
-          message: `failed to write user config: ${cause.message}`,
+          message: "failed to write user config",
+          cause,
         }),
     ),
   );
@@ -244,7 +260,8 @@ export const writeUserField = Effect.fn(function* (key: string, value: string) {
     Effect.mapError(
       (cause) =>
         new ConfigError({
-          message: `failed to write user config: ${cause.message}`,
+          message: "failed to write user config",
+          cause,
         }),
     ),
   );

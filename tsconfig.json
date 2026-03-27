@@ -7,7 +7,7 @@
     "moduleResolution": "bundler",
     "moduleDetection": "force",
     "allowJs": false,
-    "types": ["bun"],
+    "types": ["node"],
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
@@ -31,11 +31,11 @@
           "schemaStructWithTag": "error",
           "schemaUnionOfLiterals": "error",
           "serviceNotAsClass": "error",
-          "unnecessaryPipe": "error"
-        }
-      }
-    ]
+          "unnecessaryPipe": "error",
+        },
+      },
+    ],
   },
   "include": ["./src", "./tests", "./package.json", "./tsdown.config.ts"],
-  "exclude": ["dist", "node_modules"]
+  "exclude": ["dist", "node_modules"],
 }

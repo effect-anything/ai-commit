@@ -44,6 +44,6 @@ export const buildEnvironment = Effect.gen(function* () {
     gitignoreBaseUrl,
     xdgConfigHome,
   };
-});
+}).pipe(Effect.orDie);
 
 export const cwdEnvironment = envStringWithDefault("PWD", process.cwd());

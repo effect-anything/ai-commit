@@ -1,26 +1,79 @@
-import { Effect, FileSystem, Path, Schema } from "effect";
+import { Effect, FileSystem, Path, Schema, SchemaTransformation } from "effect";
 import { parse, stringify } from "yaml";
-import type { ProjectConfig, ProjectScope } from "../domain/project";
-import { emptyProjectConfig } from "../domain/project";
-import { ConfigError } from "../shared/errors";
-import { getKeyDef } from "./keys";
+import type { ProjectConfig } from "../domain/project.ts";
+import { ProjectScope, emptyProjectConfig } from "../domain/project.ts";
+import { ConfigError } from "../shared/errors.ts";
+import { getKeyDef } from "./keys.ts";
 
+const TrimmedString = Schema.String.pipe(Schema.decode(SchemaTransformation.trim()));
+const NonEmptyTrimmedString = TrimmedString.check(Schema.isNonEmpty());
+const CompactTrimmedStringArray = Schema.Array(TrimmedString).pipe(
+  Schema.decodeTo(
+    Schema.Array(TrimmedString),
+    SchemaTransformation.transform({
+      decode: (items) => items.filter((item) => item.length > 0) as ReadonlyArray<string>,
+      encode: (items) => items,
+    }),
+  ),
+);
+const NonEmptyCompactTrimmedStringArray = CompactTrimmedStringArray.pipe(
+  Schema.decodeTo(
+    Schema.Array(NonEmptyTrimmedString).check(Schema.isNonEmpty()),
+    SchemaTransformation.transform({
+      decode: (items) => items,
+      encode: (items) => items,
+    }),
+  ),
+);
+
+const RawYamlMapSchema = Schema.Record(Schema.String, Schema.Unknown);
 type RawYamlMap = Record<string, unknown>;
-type RawScopeInput = string | { readonly name: string; readonly description?: string | undefined };
-type RawHookInput = string | ReadonlyArray<string>;
 
-const RawScopeSchema = Schema.Union([
+const RawScopeInput = Schema.Union([
   Schema.String,
   Schema.Struct({
     name: Schema.String,
-    description: Schema.optional(Schema.String),
+    description: Schema.optionalKey(Schema.String),
   }),
 ]);
-const RawHooksSchema = Schema.Union([Schema.String, Schema.Array(Schema.String)]);
+const ScopeListField = Schema.Array(RawScopeInput).pipe(
+  Schema.decodeTo(
+    Schema.Array(ProjectScope),
+    SchemaTransformation.transform({
+      decode: (scopes) =>
+        scopes.map((scope) =>
+          typeof scope === "string"
+            ? { name: scope }
+            : {
+                name: scope.name,
+                ...(scope.description?.trim().length ? { description: scope.description } : {}),
+              },
+        ) as ReadonlyArray<{ readonly name: string; readonly description?: string }>,
+      encode: (scopes) =>
+        scopes.map((scope) => ({
+          name: scope.name,
+          ...(scope.description != null ? { description: scope.description } : {}),
+        })) as ReadonlyArray<{ readonly name: string; readonly description?: string }>,
+    }),
+  ),
+);
 
-const configError = (pathValue: string, message: string) =>
+const RawHookInput = Schema.Union([Schema.String, Schema.Array(Schema.String)]);
+const HookListField = RawHookInput.pipe(
+  Schema.decodeTo(
+    NonEmptyCompactTrimmedStringArray,
+    SchemaTransformation.transform({
+      decode: (input) =>
+        (typeof input === "string" ? input.split(",") : [...input]) as ReadonlyArray<string>,
+      encode: (input) => input,
+    }),
+  ),
+);
+
+const configError = (pathValue: string, message: string, cause?: unknown | undefined) =>
   new ConfigError({
     message: `invalid config ${pathValue}: ${message}`,
+    cause,
   });
 
 const decodeConfigField = <S extends Schema.Top>(
@@ -32,107 +85,62 @@ const decodeConfigField = <S extends Schema.Top>(
   input === undefined
     ? Effect.succeed(undefined)
     : Schema.decodeUnknownEffect(schema)(input).pipe(
-        Effect.mapError((cause) => configError(pathValue, `${key}: ${cause.message}`)),
+        Effect.mapError((cause) => configError(pathValue, key, cause)),
       );
 
 const readYamlMap = Effect.fn(function* (pathValue: string) {
   const fs = yield* FileSystem.FileSystem;
   const exists = yield* fs.exists(pathValue);
   if (!exists) {
-    return {};
+    return {} as RawYamlMap;
   }
 
   const text = yield* fs.readFileString(pathValue, "utf8").pipe(
     Effect.mapError(
       (cause) =>
         new ConfigError({
-          message: `failed to read config ${pathValue}: ${cause.message}`,
+          message: `failed to read config ${pathValue}`,
+          cause,
         }),
     ),
   );
 
   return yield* Effect.try({
-    try: () => {
-      const parsed = parse(text);
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        throw configError(pathValue, "expected a YAML mapping");
-      }
-      return parsed as RawYamlMap;
-    },
+    try: () => parse(text),
     catch: (cause) =>
-      ConfigError.is(cause)
-        ? cause
-        : new ConfigError({
-            message: `failed to read config ${pathValue}: ${cause instanceof Error ? cause.message : String(cause)}`,
-          }),
-  });
+      new ConfigError({
+        message: `failed to read config ${pathValue}`,
+        cause,
+      }),
+  }).pipe(
+    Effect.flatMap((parsed) => Schema.decodeUnknownEffect(RawYamlMapSchema)(parsed)),
+    Effect.map((parsed) => ({ ...parsed })),
+    Effect.mapError((cause) => configError(pathValue, "expected a YAML mapping", cause)),
+  );
 });
-
-const normalizeScope = (
-  pathValue: string,
-  input: RawScopeInput,
-  index: number,
-): Effect.Effect<ProjectScope, ConfigError> => {
-  if (typeof input === "string") {
-    const name = input.trim();
-    return name.length > 0
-      ? Effect.succeed({ name })
-      : Effect.failSync(() => configError(pathValue, `scopes[${index}] must not be empty`));
-  }
-
-  const name = input.name.trim();
-  if (name.length === 0) {
-    return Effect.failSync(() => configError(pathValue, `scopes[${index}].name must not be empty`));
-  }
-
-  const description = input.description?.trim();
-  return Effect.succeed({
-    name,
-    ...(description != null && description.length > 0 ? { description } : {}),
-  });
-};
 
 const decodeScopes = Effect.fn(function* (pathValue: string, rawMap: RawYamlMap) {
-  const scopes = yield* decodeConfigField(
-    pathValue,
-    "scopes",
-    rawMap["scopes"],
-    Schema.Array(RawScopeSchema),
-  );
-  if (scopes == null) {
-    return [] as Array<ProjectScope>;
-  }
-  return yield* Effect.forEach(scopes, (scope, index) => normalizeScope(pathValue, scope, index));
+  return ((yield* decodeConfigField(pathValue, "scopes", rawMap["scopes"], ScopeListField)) ??
+    []) as Array<ProjectScope>;
 });
 
-const normalizeHookValues = (
-  pathValue: string,
-  key: "hook" | "hook_type",
-  input: RawHookInput,
-): Effect.Effect<Array<string>, ConfigError> => {
-  const normalized = (typeof input === "string" ? input.split(",") : [...input])
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-  return normalized.length > 0
-    ? Effect.succeed(normalized)
-    : Effect.failSync(() => configError(pathValue, `${key} must not be empty`));
-};
-
 const decodeHooks = Effect.fn(function* (pathValue: string, rawMap: RawYamlMap) {
-  const hooks = yield* decodeConfigField(pathValue, "hook", rawMap["hook"], RawHooksSchema);
+  const hooks = yield* decodeConfigField(pathValue, "hook", rawMap["hook"], HookListField);
   if (hooks != null) {
-    return yield* normalizeHookValues(pathValue, "hook", hooks);
+    return hooks;
   }
 
   const legacyHook = yield* decodeConfigField(
     pathValue,
     "hook_type",
     rawMap["hook_type"],
-    Schema.String,
+    HookListField,
   );
+
   if (legacyHook != null) {
-    return yield* normalizeHookValues(pathValue, "hook_type", legacyHook);
+    return legacyHook;
   }
+
   return [] as Array<string>;
 });
 
@@ -158,7 +166,9 @@ export const projectConfigWritePath = (repoRoot: string) => gitAgentPath(repoRoo
 
 export const localConfigPath = (repoRoot: string) => gitAgentPath(repoRoot, "config.local.yml");
 
-export const loadProjectConfig = Effect.fn(function* (repoRoot: string) {
+export const loadProjectConfig = Effect.fn("Config.LoadProjectConfig")(function* (
+  repoRoot: string,
+) {
   const projectPath = yield* projectConfigPath(repoRoot);
   const localPath = yield* localConfigPath(repoRoot);
   const projectRaw = yield* readYamlMap(projectPath);
@@ -235,7 +245,7 @@ export const loadProjectConfig = Effect.fn(function* (repoRoot: string) {
   } satisfies ProjectConfig;
 });
 
-export const mergeAndSaveScopes = Effect.fn(function* (
+export const mergeScopes = Effect.fn("Config.MergeScopes")(function* (
   pathValue: string,
   nextScopes: ReadonlyArray<ProjectScope>,
 ) {
@@ -268,19 +278,23 @@ export const mergeAndSaveScopes = Effect.fn(function* (
   }
 
   rawMap["scopes"] = merged;
+
   yield* fs.makeDirectory(path.dirname(pathValue), { recursive: true }).pipe(
     Effect.mapError(
       (cause) =>
         new ConfigError({
-          message: `failed to save scopes to ${pathValue}: ${cause.message}`,
+          message: `failed to save scopes to ${pathValue}`,
+          cause,
         }),
     ),
   );
+
   yield* fs.writeFileString(pathValue, stringify(rawMap), { mode: 0o644 }).pipe(
     Effect.mapError(
       (cause) =>
         new ConfigError({
-          message: `failed to save scopes to ${pathValue}: ${cause.message}`,
+          message: `failed to save scopes to ${pathValue}`,
+          cause,
         }),
     ),
   );
@@ -307,14 +321,16 @@ export const readProjectField = (pathValue: string, key: string) =>
     return yamlValueToString(rawMap[key]);
   });
 
-export const writeProjectField = Effect.fn(function* (
+export const writeProjectField = Effect.fn("Config.WriteProjectField")(function* (
   pathValue: string,
   key: string,
   value: string,
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+
   const rawMap = yield* readYamlMap(pathValue);
+
   const def = getKeyDef(key);
   if (def == null) {
     return yield* new ConfigError({ message: `unknown config key "${key}"` });
@@ -341,15 +357,18 @@ export const writeProjectField = Effect.fn(function* (
     Effect.mapError(
       (cause) =>
         new ConfigError({
-          message: `failed to write config ${pathValue}: ${cause.message}`,
+          message: `failed to write config ${pathValue}`,
+          cause,
         }),
     ),
   );
+
   yield* fs.writeFileString(pathValue, stringify(rawMap), { mode: 0o644 }).pipe(
     Effect.mapError(
       (cause) =>
         new ConfigError({
-          message: `failed to write config ${pathValue}: ${cause.message}`,
+          message: `failed to write config ${pathValue}`,
+          cause,
         }),
     ),
   );

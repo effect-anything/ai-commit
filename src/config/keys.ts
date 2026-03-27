@@ -1,4 +1,4 @@
-import { ConfigError } from "../shared/errors";
+import { ConfigError } from "../shared/errors.ts";
 
 export const ScopeUser = "user";
 export const ScopeProject = "project";
@@ -8,9 +8,9 @@ export type ConfigScope = typeof ScopeUser | typeof ScopeProject | typeof ScopeL
 
 interface KeyDef {
   readonly type: "string" | "bool" | "int" | "stringslice";
-  readonly allowUser?: boolean;
-  readonly allowProject?: boolean;
-  readonly allowLocal?: boolean;
+  readonly allowUser?: boolean | undefined;
+  readonly allowProject?: boolean | undefined;
+  readonly allowLocal?: boolean | undefined;
 }
 
 const keyRegistry: Record<string, KeyDef> = {
