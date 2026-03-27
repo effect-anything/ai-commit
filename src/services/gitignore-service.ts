@@ -2,7 +2,6 @@ import { platform } from "node:os";
 import { AiError } from "effect/unstable/ai";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import {
-  Cause,
   DateTime,
   Duration,
   Effect,
@@ -188,16 +187,16 @@ const invalidLlmOutputError = (method: string, description: string): AiError.AiE
 const isRetryableInvalidModelOutput = (error: ApiError | AiError.AiError): boolean =>
   ApiError.is(error) || (AiError.isAiError(error) && error.reason.isRetryable);
 
-export interface GenerateGitignoreInput {
+interface GenerateGitignoreInput {
   readonly provider: ProviderConfig;
   readonly vcs: VcsClient;
   readonly cwd: string;
 }
 
-export interface GitignoreServiceShape {
+interface GitignoreServiceShape {
   readonly generateGitignore: (
     input: GenerateGitignoreInput,
-  ) => Effect.Effect<ReadonlyArray<string>, ApiError | AiError.AiError | unknown>;
+  ) => Effect.Effect<ReadonlyArray<string>, ApiError | AiError.AiError>;
 }
 
 export class GitignoreService extends ServiceMap.Service<GitignoreService, GitignoreServiceShape>()(
@@ -255,11 +254,23 @@ export const GitignoreServiceLive = Layer.effect(
     const generateGitignore: GitignoreServiceShape["generateGitignore"] = Effect.fn(
       "Config.GenerateGitignore",
     )(function* ({ provider, vcs, cwd }: GenerateGitignoreInput) {
-      const [dirs, files] = yield* Effect.all([vcs.topLevelDirs(cwd), vcs.projectFiles(cwd)]);
+      const [dirs, files] = yield* Effect.all([vcs.topLevelDirs(cwd), vcs.projectFiles(cwd)]).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ApiError({
+              message: "failed to inspect repository for .gitignore generation",
+              cause,
+            }),
+        ),
+      );
       let technologies = yield* detectTechnologies(provider, runtimeOs(), dirs, files);
       const fetched = yield* fetchGitignore(technologies).pipe(
-        Effect.catchCause((error) =>
-          Effect.die(`failed to fetch gitignore template (${Cause.pretty(error)})`),
+        Effect.mapError(
+          (cause) =>
+            new ApiError({
+              message: "failed to fetch gitignore template",
+              cause,
+            }),
         ),
       );
       const actualTechnologies = toptalTechs(fetched);

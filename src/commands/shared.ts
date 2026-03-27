@@ -25,10 +25,6 @@ export const modelFlag = Flag.optional(
   Flag.string("model").pipe(Flag.withDescription("Model name for generation.")),
 );
 
-export const freeFlag = Flag.boolean("free").pipe(
-  Flag.withDescription("Use only build-time embedded credentials."),
-);
-
 export const toOptionalString = (value: Option.Option<string>): string | undefined =>
   Option.match(value, {
     onNone: () => undefined,

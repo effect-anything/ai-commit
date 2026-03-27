@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { ConfigError } from "../shared/errors.ts";
 
 export const ScopeUser = "user";
@@ -32,31 +33,37 @@ const keyAliases: Record<string, string> = {
   "no-model-co-author": "no_model_co_author",
 };
 
-export const resolveKey = (raw: string): string => {
+const failConfig = (message: string) => Effect.fail(new ConfigError({ message }));
+
+export const resolveKey = (raw: string): Effect.Effect<string, ConfigError> => {
   if (raw in keyRegistry) {
-    return raw;
+    return Effect.succeed(raw);
   }
   const aliased = keyAliases[raw];
   if (typeof aliased === "string") {
-    return aliased;
+    return Effect.succeed(aliased);
   }
-  throw new ConfigError({ message: `unknown config key "${raw}"` });
+  return failConfig(`unknown config key "${raw}"`);
 };
 
-export const validateScope = (key: string, scope: ConfigScope): void => {
+export const validateScope = (
+  key: string,
+  scope: ConfigScope,
+): Effect.Effect<void, ConfigError> => {
   const def = keyRegistry[key];
   if (def == null) {
-    throw new ConfigError({ message: `unknown config key "${key}"` });
+    return failConfig(`unknown config key "${key}"`);
   }
   if (scope === ScopeUser && !def.allowUser) {
-    throw new ConfigError({ message: `key "${key}" cannot be set in user scope` });
+    return failConfig(`key "${key}" cannot be set in user scope`);
   }
   if (scope === ScopeProject && !def.allowProject) {
-    throw new ConfigError({ message: `key "${key}" cannot be set in project scope` });
+    return failConfig(`key "${key}" cannot be set in project scope`);
   }
   if (scope === ScopeLocal && !def.allowLocal) {
-    throw new ConfigError({ message: `key "${key}" cannot be set in local scope` });
+    return failConfig(`key "${key}" cannot be set in local scope`);
   }
+  return Effect.void;
 };
 
 export const defaultScopeForKey = (key: string): ConfigScope => {
@@ -67,40 +74,38 @@ export const defaultScopeForKey = (key: string): ConfigScope => {
   return ScopeProject;
 };
 
-export const normalizeValue = (key: string, raw: string): string => {
+export const normalizeValue = (key: string, raw: string): Effect.Effect<string, ConfigError> => {
   const def = keyRegistry[key];
   if (def == null) {
-    throw new ConfigError({ message: `unknown config key "${key}"` });
+    return failConfig(`unknown config key "${key}"`);
   }
   if (raw.trim().length === 0) {
-    throw new ConfigError({ message: `empty value for key "${key}"` });
+    return failConfig(`empty value for key "${key}"`);
   }
 
   switch (def.type) {
     case "bool":
       if (raw !== "true" && raw !== "false") {
-        throw new ConfigError({
-          message: `invalid boolean value "${raw}" for "${key}": must be true or false`,
-        });
+        return failConfig(`invalid boolean value "${raw}" for "${key}": must be true or false`);
       }
-      return raw;
+      return Effect.succeed(raw);
     case "int":
       if (!/^-?\d+$/.test(raw)) {
-        throw new ConfigError({ message: `invalid integer value "${raw}" for "${key}"` });
+        return failConfig(`invalid integer value "${raw}" for "${key}"`);
       }
-      return String(Number(raw));
+      return Effect.succeed(String(Number(raw)));
     case "stringslice": {
       const parts = raw
         .split(",")
         .map((value) => value.trim())
         .filter((value) => value.length > 0);
       if (parts.length === 0) {
-        throw new ConfigError({ message: `empty value for key "${key}"` });
+        return failConfig(`empty value for key "${key}"`);
       }
-      return parts.join(",");
+      return Effect.succeed(parts.join(","));
     }
     default:
-      return raw;
+      return Effect.succeed(raw);
   }
 };
 

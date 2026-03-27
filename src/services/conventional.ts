@@ -1,18 +1,17 @@
 import { Schema } from "effect";
-import { wrapExplanation } from "../shared/text.ts";
 
-export const ValidationIssue = Schema.Struct({
+const ValidationIssue = Schema.Struct({
   severity: Schema.Union([Schema.Literal("error"), Schema.Literal("warning")]),
   message: Schema.String,
 });
 
-export type ValidationIssue = typeof ValidationIssue.Type;
+type ValidationIssue = typeof ValidationIssue.Type;
 
-export const ValidationResult = Schema.Struct({
+const ValidationResult = Schema.Struct({
   issues: Schema.Array(ValidationIssue),
 });
 
-export type ValidationResult = typeof ValidationResult.Type;
+type ValidationResult = typeof ValidationResult.Type;
 
 const headerRegex =
   /^(feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert)(\([a-z0-9_-]+\))?!?: .+/;
@@ -173,5 +172,3 @@ export const validationErrors = (result: ValidationResult): Array<string> =>
 
 export const validationWarnings = (result: ValidationResult): Array<string> =>
   result.issues.filter((issue) => issue.severity === "warning").map((issue) => issue.message);
-
-export const normalizeExplanation = (text: string): string => wrapExplanation(text, 72);

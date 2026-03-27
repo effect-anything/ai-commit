@@ -134,7 +134,7 @@ const tree = {
 };
 const detailPrefix = "↳ ";
 
-export const defaultProgressRenderConfig: ProgressRenderConfig = {};
+const defaultProgressRenderConfig: ProgressRenderConfig = {};
 
 const formatDurationCompact = (nanos: bigint): string => {
   const millis = Number(nanos) / 1e6;
@@ -803,19 +803,11 @@ class ProgressTreeRenderer implements ProgressLoggerService {
   }
 }
 
-export class ProgressLogger extends ServiceMap.Service<ProgressLogger, ProgressLoggerService>()(
+class ProgressLogger extends ServiceMap.Service<ProgressLogger, ProgressLoggerService>()(
   "@ai-commit/ProgressLogger",
 ) {}
 
-export const ProgressLoggerLive = Layer.effect(
-  ProgressLogger,
-  Effect.acquireRelease(
-    Effect.sync(() => new ProgressTreeRenderer()),
-    (logger) => Effect.sync(() => logger.close()),
-  ),
-);
-
-export const ProgressTracingLayer = Layer.effect(
+const ProgressTracingLayer = Layer.effect(
   Tracer.Tracer,
   Effect.gen(function* () {
     const progressLogger = yield* ProgressLogger;
@@ -838,9 +830,7 @@ export const ProgressTracingLayer = Layer.effect(
   }),
 );
 
-export const makeProgressLoggerLayer = (
-  config: ProgressRenderConfig = defaultProgressRenderConfig,
-) =>
+const makeProgressLoggerLayer = (config: ProgressRenderConfig = defaultProgressRenderConfig) =>
   Layer.effect(
     ProgressLogger,
     Effect.acquireRelease(
@@ -851,5 +841,3 @@ export const makeProgressLoggerLayer = (
 
 export const makeProgressLayer = (config: ProgressRenderConfig = defaultProgressRenderConfig) =>
   ProgressTracingLayer.pipe(Layer.provide(makeProgressLoggerLayer(config)));
-
-export const ProgressLayer = makeProgressLayer();

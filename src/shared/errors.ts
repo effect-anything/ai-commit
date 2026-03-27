@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-export class CliUsageError extends Schema.TaggedErrorClass<CliUsageError>()("CliUsageError", {
+class CliUsageError extends Schema.TaggedErrorClass<CliUsageError>()("CliUsageError", {
   message: Schema.String,
 }) {
   static is = Schema.is(this);

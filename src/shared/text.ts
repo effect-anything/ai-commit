@@ -7,7 +7,7 @@ export const countLines = (content: string): number => {
   return content.endsWith("\n") ? content.split("\n").length - 1 : content.split("\n").length;
 };
 
-export const wrapLongLine = (line: string, width: number): Array<string> => {
+const wrapLongLine = (line: string, width: number): Array<string> => {
   const parts: Array<string> = [];
   let remaining = line;
 
@@ -102,7 +102,7 @@ export const appendTrailers = (message: string, trailers: ReadonlyArray<Trailer>
   return `${message.trimEnd()}\n\n${footer}`;
 };
 
-export const parseCsv = (input: string | undefined): Array<string> =>
+const parseCsv = (input: string | undefined): Array<string> =>
   (input ?? "")
     .split(",")
     .map((value) => value.trim())

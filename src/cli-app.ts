@@ -5,6 +5,7 @@ import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import type { HttpClient } from "effect/unstable/http";
 import PackageJson from "../package.json" with { type: "json" };
 import { commandRoot } from "./commands/root.ts";
+import { ConfigServiceLive } from "./config/service.ts";
 import { CommitLlmServicesLive, CommitServiceLive } from "./services/commit-service.ts";
 import { GitignoreServiceLive } from "./services/gitignore-service.ts";
 import { HookServiceLive } from "./services/hooks.ts";
@@ -24,32 +25,38 @@ export const makePlatformLayer = (
   httpClientLayer: Layer.Layer<HttpClient.HttpClient> = FetchHttpClient.layer,
 ) => Layer.mergeAll(NodeServices.layer, httpClientLayer);
 
-export const makeServicesLayer = (
+const makeServicesLayer = (
+  configProvider: Layer.Layer<never>,
   platformLayer?: Layer.Layer<HttpClient.HttpClient | NodeServices.NodeServices> | undefined,
 ) => {
+  const platform = platformLayer ?? makePlatformLayer();
   const coreServices = Layer.mergeAll(VcsLive, HookServiceLive, LlmClientLive).pipe(
-    Layer.provideMerge(platformLayer ?? makePlatformLayer()),
+    Layer.provideMerge(platform),
+  );
+  const configServices = ConfigServiceLive.pipe(
+    Layer.provideMerge(Layer.mergeAll(platform, configProvider)),
   );
 
   const featureServices = Layer.mergeAll(
     CommitLlmServicesLive,
     ScopeServiceLive,
     GitignoreServiceLive,
-  ).pipe(Layer.provideMerge(coreServices));
+  ).pipe(Layer.provideMerge(Layer.mergeAll(coreServices, configServices)));
 
   const commitRuntime = CommitServiceLive.pipe(
-    Layer.provideMerge(Layer.mergeAll(coreServices, featureServices)),
+    Layer.provideMerge(Layer.mergeAll(coreServices, configServices, featureServices)),
   );
 
   return Layer.mergeAll(
     coreServices,
+    configServices,
     featureServices,
     commitRuntime,
     makeProgressLayer(gitAgentProgressRenderConfig),
   );
 };
 
-export interface CliProgramOptions {
+interface CliProgramOptions {
   readonly env?: Record<string, string | undefined> | undefined;
   readonly platformLayer?:
     | Layer.Layer<HttpClient.HttpClient | NodeServices.NodeServices>
@@ -60,10 +67,10 @@ export const makeCliProgram = (
   args: ReadonlyArray<string>,
   options: CliProgramOptions = {},
 ): Effect.Effect<number, never> => {
-  const services = makeServicesLayer(options.platformLayer);
   const configProvider = ConfigProvider.layer(
     ConfigProvider.fromEnv({ env: toConfigEnv(options.env ?? process.env) }),
   );
+  const services = makeServicesLayer(configProvider, options.platformLayer);
   const live = Layer.mergeAll(services, configProvider);
 
   return Command.runWith(commandRoot, {

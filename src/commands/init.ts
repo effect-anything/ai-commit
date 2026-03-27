@@ -1,12 +1,6 @@
 import { Console, Effect, FileSystem } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
-import {
-  localConfigPath,
-  mergeScopes,
-  projectConfigWritePath,
-  writeProjectField,
-} from "../config/project.ts";
-import { resolveProviderConfig } from "../config/provider.ts";
+import { ConfigService } from "../config/service.ts";
 import { emptyProjectConfig } from "../domain/project.ts";
 import { GitignoreService } from "../services/gitignore-service.ts";
 import { ScopeService } from "../services/scope-service.ts";
@@ -17,7 +11,6 @@ import {
   apiKeyFlag,
   baseUrlFlag,
   cwdFlag,
-  freeFlag,
   modelFlag,
   toOptionalString,
   vcsFlag,
@@ -31,7 +24,6 @@ export const commandInit = Command.make(
     apiKey: apiKeyFlag,
     baseUrl: baseUrlFlag,
     model: modelFlag,
-    free: freeFlag,
     scope: Flag.boolean("scope").pipe(Flag.withDescription("Generate scopes via AI.")),
     gitignore: Flag.boolean("gitignore").pipe(Flag.withDescription("Generate .gitignore via AI.")),
     force: Flag.boolean("force").pipe(
@@ -42,7 +34,7 @@ export const commandInit = Command.make(
       Flag.withDescription("Maximum commit count to analyze for scopes."),
     ),
     local: Flag.boolean("local").pipe(
-      Flag.withDescription("Write config to .ai-commit/config.local.yml."),
+      Flag.withDescription("Write config to .ai-commit/config.local.json."),
     ),
     hook: Flag.string("hook").pipe(
       Flag.withDescription("Hook to configure. Repeat the flag or use comma-separated values."),
@@ -50,6 +42,7 @@ export const commandInit = Command.make(
     ),
   },
   Effect.fn("Command.Init")(function* (input) {
+    const configService = yield* ConfigService;
     yield* Effect.annotateCurrentSpan({
       force: input.force,
       gitignore: input.gitignore,
@@ -88,10 +81,10 @@ export const commandInit = Command.make(
     }
 
     const configPath = yield* input.local
-      ? localConfigPath(repoRoot)
-      : projectConfigWritePath(repoRoot);
+      ? configService.localConfigPath(repoRoot)
+      : configService.projectConfigPath(repoRoot);
 
-    if (!input.force) {
+    if (fullWizard && !input.force) {
       const exists = yield* fs.exists(configPath);
       if (exists) {
         return yield* new ConfigError({
@@ -100,7 +93,7 @@ export const commandInit = Command.make(
       }
     }
 
-    const provider = yield* resolveProviderConfig({
+    const provider = yield* configService.resolveProviderConfig({
       cwd: input.cwd,
       vcs: vcsKind,
       apiKey: toOptionalString(input.apiKey),
@@ -111,7 +104,7 @@ export const commandInit = Command.make(
     if ((doGitignore || doScope || fullWizard) && provider.apiKey.length === 0) {
       return yield* new ConfigError({
         message:
-          "no API key configured (hint: set --api-key or add api_key to ~/.config/ai-commit/config.yml)",
+          "no API key configured (hint: set --api-key or add api_key to ~/.config/ai-commit/config.json)",
       });
     }
 
@@ -134,24 +127,24 @@ export const commandInit = Command.make(
         cwd: repoRoot,
         maxCommits: input.maxCommits,
       });
-      yield* mergeScopes(configPath, scopes);
+      yield* configService.mergeScopes(configPath, scopes);
       yield* Console.log(`scopes written to ${configPath}`);
     }
 
     if (fullWizard) {
       yield* Effect.withSpan(
-        writeProjectField(configPath, "hook", "conventional"),
+        configService.writeProjectField(configPath, "hook", "conventional"),
         "Init.WriteDefaultHook",
       );
     } else if (hooks.length > 0) {
       yield* Effect.withSpan(
-        writeProjectField(configPath, "hook", hooks.join(",")),
+        configService.writeProjectField(configPath, "hook", hooks.join(",")),
         "Init.WriteHook",
       );
     }
 
     if (!doScope && !doGitignore && !fullWizard && hooks.length > 0) {
-      yield* mergeScopes(configPath, emptyProjectConfig().scopes);
+      yield* configService.mergeScopes(configPath, emptyProjectConfig().scopes);
     }
   }),
 ).pipe(Command.withDescription("Initialize ai-commit in the current repository."));

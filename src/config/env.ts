@@ -2,13 +2,13 @@ import { Config, Effect, Option } from "effect";
 
 export const DefaultBaseUrl = "https://api.openai.com/v1";
 export const DefaultModel = "gpt-5-nano";
-export const DefaultGitignoreBaseUrl = "https://www.toptal.com/developers/gitignore/api";
+const DefaultGitignoreBaseUrl = "https://www.toptal.com/developers/gitignore/api";
 
-export const envString = (name: string) => Config.string(name);
+const envString = (name: string) => Config.string(name);
 
-export const envOptionalString = (name: string) => Config.option(envString(name));
+const envOptionalString = (name: string) => Config.option(envString(name));
 
-export const envStringWithDefault = (name: string, fallback: string) =>
+const envStringWithDefault = (name: string, fallback: string) =>
   envString(name).pipe(Config.withDefault(fallback));
 
 const readPreferredEnv = Effect.fn(function* (names: ReadonlyArray<string>, fallback: string) {
@@ -44,6 +44,6 @@ export const buildEnvironment = Effect.gen(function* () {
     gitignoreBaseUrl,
     xdgConfigHome,
   };
-}).pipe(Effect.orDie);
+});
 
 export const cwdEnvironment = envStringWithDefault("PWD", process.cwd());

@@ -3,7 +3,6 @@ import { Effect, Layer, pipe, Redacted, Schedule, ServiceMap } from "effect";
 import { AiError, LanguageModel } from "effect/unstable/ai";
 import { HttpClient } from "effect/unstable/http";
 import type { ProviderConfig } from "../config/provider.ts";
-export type { ProviderConfig } from "../config/provider.ts";
 import { ApiError } from "../shared/errors.ts";
 
 const llmTransientRetrySchedule = Schedule.either(
@@ -56,14 +55,14 @@ const makeLanguageModelLayer = (config: ProviderConfig, maxOutputTokens: number)
     ),
   );
 
-export interface LlmCallInput {
+interface LlmCallInput {
   readonly provider: ProviderConfig;
   readonly systemPrompt: string;
   readonly userPrompt: string;
   readonly maxOutputTokens: number;
 }
 
-export interface LlmClientService {
+interface LlmClientService {
   readonly call: (input: LlmCallInput) => Effect.Effect<string, ApiError | AiError.AiError>;
 }
 

@@ -10,20 +10,13 @@ import {
   type ConfigScope,
   validateScope,
 } from "../config/keys.ts";
-import {
-  readBuildProviderDefaults,
-  resolveField,
-  resolveProviderConfig,
-  writeUserField,
-} from "../config/provider.ts";
-import { localConfigPath, projectConfigWritePath, writeProjectField } from "../config/project.ts";
+import { ConfigService } from "../config/service.ts";
 import { HookService } from "../services/hooks.ts";
 import { Vcs } from "../services/vcs.ts";
 import {
   apiKeyFlag,
   baseUrlFlag,
   cwdFlag,
-  freeFlag,
   modelFlag,
   toOptionalString,
   vcsFlag,
@@ -37,28 +30,21 @@ const configShow = Command.make(
     apiKey: apiKeyFlag,
     baseUrl: baseUrlFlag,
     model: modelFlag,
-    free: freeFlag,
   },
   Effect.fn("Command.ConfigShow")(function* (input) {
+    const configService = yield* ConfigService;
     const vcsService = yield* Vcs;
     const vcsKind = yield* vcsService.detect(input.cwd, toOptionalString(input.vcs));
 
     yield* Effect.annotateCurrentSpan({ vcs: vcsKind });
 
-    const config = yield* resolveProviderConfig({
+    const config = yield* configService.resolveProviderConfig({
       cwd: input.cwd,
       vcs: vcsKind,
       apiKey: toOptionalString(input.apiKey),
       baseUrl: toOptionalString(input.baseUrl),
       model: toOptionalString(input.model),
     });
-
-    const build = yield* readBuildProviderDefaults;
-
-    if (build.apiKey.length > 0 && config.apiKey === build.apiKey) {
-      yield* Console.log("mode: FREE (using built-in credentials)");
-      return;
-    }
 
     const masked =
       config.apiKey.length === 0
@@ -80,12 +66,13 @@ const configGet = Command.make(
     key: Argument.string("key").pipe(Argument.withDescription("Configuration key to read.")),
   },
   Effect.fn("Command.ConfigGet")(function* (input) {
-    const key = resolveKey(input.key);
+    const configService = yield* ConfigService;
+    const key = yield* resolveKey(input.key);
     const vcsService = yield* Vcs;
     const { client: vcs } = yield* vcsService.resolve(input.cwd, toOptionalString(input.vcs));
     const isRepo = yield* vcs.isRepo(input.cwd);
     const repoRoot = isRepo ? yield* vcs.repoRoot(input.cwd) : undefined;
-    const resolved = yield* resolveField(repoRoot, key);
+    const resolved = yield* configService.resolveField(repoRoot, key);
     if (resolved == null) {
       yield* Console.log(`${key} is not set`);
       return;
@@ -110,13 +97,14 @@ const configSet = Command.make(
     ),
   },
   Effect.fn("Command.ConfigSet")(function* (input) {
-    const key = resolveKey(input.key);
-    const value = normalizeValue(key, input.value);
+    const configService = yield* ConfigService;
+    const key = yield* resolveKey(input.key);
+    const value = yield* normalizeValue(key, input.value);
     const scope = (toOptionalString(input.scope) ?? defaultScopeForKey(key)) as ConfigScope;
-    validateScope(key, scope);
+    yield* validateScope(key, scope);
 
     if (scope === ScopeUser) {
-      yield* writeUserField(key, value);
+      yield* configService.writeUserField(key, value);
       yield* Console.log(`set ${key} = ${value}  (user)`);
       return;
     }
@@ -130,9 +118,9 @@ const configSet = Command.make(
       yield* Console.log(`installed hook: ${prepared.installedFrom}`);
     }
     const path = yield* scope === ScopeLocal
-      ? localConfigPath(repoRoot)
-      : projectConfigWritePath(repoRoot);
-    yield* writeProjectField(path, key, prepared.value);
+      ? configService.localConfigPath(repoRoot)
+      : configService.projectConfigPath(repoRoot);
+    yield* configService.writeProjectField(path, key, prepared.value);
     yield* Console.log(`set ${key} = ${prepared.value}  (${scope})`);
   }),
 ).pipe(Command.withDescription("Write a configuration value."));

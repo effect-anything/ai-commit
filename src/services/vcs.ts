@@ -155,6 +155,13 @@ export interface VcsClient {
   readonly repoRoot: (cwd: string) => Effect.Effect<string, ProcessExecutionError>;
   readonly stagedDiff: (cwd: string) => Effect.Effect<VcsDiff, ProcessExecutionError>;
   readonly unstagedDiff: (cwd: string) => Effect.Effect<VcsDiff, ProcessExecutionError>;
+  readonly untrackedFiles: (
+    cwd: string,
+  ) => Effect.Effect<ReadonlyArray<string>, ProcessExecutionError>;
+  readonly untrackedDiff: (
+    cwd: string,
+    files: ReadonlyArray<string>,
+  ) => Effect.Effect<VcsDiff, ProcessExecutionError>;
   readonly diffForFiles: (
     cwd: string,
     files: ReadonlyArray<string>,
@@ -164,6 +171,14 @@ export interface VcsClient {
   readonly stageFiles: (
     cwd: string,
     files: ReadonlyArray<string>,
+  ) => Effect.Effect<void, ProcessExecutionError | UnsupportedFeatureError>;
+  readonly exportStagedPatch: (
+    cwd: string,
+    files: ReadonlyArray<string>,
+  ) => Effect.Effect<string, ProcessExecutionError | UnsupportedFeatureError>;
+  readonly applyStagedPatch: (
+    cwd: string,
+    patch: string,
   ) => Effect.Effect<void, ProcessExecutionError | UnsupportedFeatureError>;
   readonly unstageAll: (
     cwd: string,
@@ -195,12 +210,12 @@ export interface VcsClient {
   ) => Effect.Effect<ReadonlyArray<string>, ProcessExecutionError>;
 }
 
-export interface ResolvedVcs {
+interface ResolvedVcs {
   readonly kind: VcsKind;
   readonly client: VcsClient;
 }
 
-export interface VcsService {
+interface VcsService {
   readonly detect: (
     cwd: string,
     preferred?: string | undefined,
@@ -212,9 +227,9 @@ export interface VcsService {
   ) => Effect.Effect<ResolvedVcs, ProcessExecutionError>;
 }
 
-export class GitClient extends ServiceMap.Service<GitClient, VcsClient>()("@ai-commit/GitClient") {}
+class GitClient extends ServiceMap.Service<GitClient, VcsClient>()("@ai-commit/GitClient") {}
 
-export const GitClientLive = Layer.effect(
+const GitClientLive = Layer.effect(
   GitClient,
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -408,6 +423,41 @@ export const GitClientLive = Layer.effect(
             diffFrom(parseGitNameStatus(names.stdout), content.stdout),
           ),
         ),
+      untrackedFiles: (cwd) =>
+        Effect.map(
+          run({
+            command: "git",
+            args: ["ls-files", "--others", "--exclude-standard"],
+            cwd,
+          }),
+          (result) => normalizeLines(result.stdout),
+        ),
+      untrackedDiff: (cwd, files) => {
+        if (files.length === 0) {
+          return Effect.succeed(emptyDiff());
+        }
+        return Effect.forEach(files, (file) =>
+          run({
+            command: "git",
+            args: ["diff", "--no-index", "--", "/dev/null", file],
+            cwd,
+            allowFailure: true,
+          }).pipe(
+            Effect.flatMap((result) =>
+              result.exitCode === 0 || result.exitCode === 1
+                ? Effect.succeed(result.stdout)
+                : Effect.fail(
+                    new ProcessExecutionError({
+                      command: `git diff --no-index -- /dev/null ${file}`,
+                      exitCode: result.exitCode,
+                      stdout: result.stdout,
+                      stderr: result.stderr,
+                    }),
+                  ),
+            ),
+          ),
+        ).pipe(Effect.map((parts) => diffFrom(files, parts.join(""))));
+      },
       diffForFiles: (cwd, files, revision) => {
         const baseArgs =
           revision == null
@@ -446,6 +496,30 @@ export const GitClientLive = Layer.effect(
           args: ["add", "-f", "--", ...files],
           cwd,
         }).pipe(Effect.asVoid),
+      exportStagedPatch: (cwd, files) => {
+        if (files.length === 0) {
+          return Effect.succeed("");
+        }
+        return Effect.map(
+          run({
+            command: "git",
+            args: ["diff", "--cached", "--binary", "--", ...files],
+            cwd,
+          }),
+          (result) => result.stdout,
+        );
+      },
+      applyStagedPatch: (cwd, patch) => {
+        if (patch.trim().length === 0) {
+          return Effect.void;
+        }
+        return run({
+          command: "git",
+          args: ["apply", "--cached", "--allow-empty"],
+          cwd,
+          stdin: patch,
+        }).pipe(Effect.asVoid);
+      },
       unstageAll: (cwd) =>
         run({
           command: "git",
@@ -534,9 +608,9 @@ export const GitClientLive = Layer.effect(
   }),
 );
 
-export class JjClient extends ServiceMap.Service<JjClient, VcsClient>()("@ai-commit/JjClient") {}
+class JjClient extends ServiceMap.Service<JjClient, VcsClient>()("@ai-commit/JjClient") {}
 
-export const JjClientLive = Layer.effect(
+const JjClientLive = Layer.effect(
   JjClient,
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -759,6 +833,8 @@ export const JjClientLive = Layer.effect(
             diffFrom(normalizeLines(names.stdout), content.stdout),
           ),
         ),
+      untrackedFiles: () => Effect.succeed([]),
+      untrackedDiff: () => Effect.succeed(emptyDiff()),
       diffForFiles: (cwd, files, revision) => {
         const revisionArgs = revision == null ? [] : ["-r", revision];
         return Effect.all({
@@ -780,6 +856,10 @@ export const JjClientLive = Layer.effect(
       },
       addAll: () => Effect.void,
       stageFiles: () =>
+        Effect.fail(new UnsupportedFeatureError({ message: "jj does not support staging" })),
+      exportStagedPatch: () =>
+        Effect.fail(new UnsupportedFeatureError({ message: "jj does not support staging" })),
+      applyStagedPatch: () =>
         Effect.fail(new UnsupportedFeatureError({ message: "jj does not support staging" })),
       unstageAll: () =>
         Effect.fail(new UnsupportedFeatureError({ message: "jj does not support staging" })),

@@ -20,19 +20,19 @@ export const HookInput = Schema.Struct({
 
 export type HookInput = typeof HookInput.Type;
 
-export const HookResult = Schema.Struct({
+const HookResult = Schema.Struct({
   exitCode: Schema.Number,
   stderr: Schema.String,
 });
 
-export type HookResult = typeof HookResult.Type;
+type HookResult = typeof HookResult.Type;
 
-export const InstalledHookValue = Schema.Struct({
+const InstalledHookValue = Schema.Struct({
   value: Schema.String,
   installedFrom: Schema.String.pipe(Schema.UndefinedOr),
 });
 
-export type InstalledHookValue = typeof InstalledHookValue.Type;
+type InstalledHookValue = typeof InstalledHookValue.Type;
 
 const encodeHookInputToJson = Schema.encodeUnknownSync(HookInput);
 
@@ -49,7 +49,7 @@ const executeConventionalHook = (input: HookInput): HookResult => {
   };
 };
 
-export interface HookServiceShape {
+interface HookServiceShape {
   readonly execute: (
     hooks: ReadonlyArray<string>,
     input: HookInput,

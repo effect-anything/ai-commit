@@ -17,7 +17,7 @@ import type {
   CommitResponse,
   SingleCommitResult,
   Trailer,
-} from "../domain/commit";
+} from "../domain/commit.ts";
 import { renderCommitBody } from "../domain/commit.ts";
 import type { ProjectConfig } from "../domain/project.ts";
 import { emptyProjectConfig } from "../domain/project.ts";
@@ -25,7 +25,9 @@ import type { ProviderConfig } from "../config/provider.ts";
 import {
   ApiError,
   CommitPlanError,
+  ConfigError,
   HookBlockedError,
+  ProcessExecutionError,
   UnsupportedFeatureError,
 } from "../shared/errors.ts";
 import { extractJson, countLines, wrapExplanation } from "../shared/text.ts";
@@ -214,13 +216,13 @@ export interface PlanCommitsInput {
   readonly config: ProjectConfig;
 }
 
-export interface CommitMessageServiceShape {
+interface CommitMessageServiceShape {
   readonly generate: (
     input: GenerateCommitMessageInput,
   ) => Effect.Effect<CommitMessage, ApiError | AiError.AiError>;
 }
 
-export interface CommitPlannerServiceShape {
+interface CommitPlannerServiceShape {
   readonly plan: (
     input: PlanCommitsInput,
   ) => Effect.Effect<{ readonly groups: ReadonlyArray<CommitGroup> }, ApiError | AiError.AiError>;
@@ -264,6 +266,22 @@ const truncateDiff = (diff: VcsDiff, maxLines: number): VcsDiff => {
   const content = lines.join("\n");
   return {
     files: [...diff.files],
+    content,
+    lines: countLines(content),
+  };
+};
+
+const emptyDiff = (): VcsDiff => ({
+  files: [],
+  content: "",
+  lines: 0,
+});
+
+const mergeDiffs = (...diffs: ReadonlyArray<VcsDiff>): VcsDiff => {
+  const files = [...new Set(diffs.flatMap((diff) => diff.files))];
+  const content = diffs.map((diff) => diff.content).join("");
+  return {
+    files,
     content,
     lines: countLines(content),
   };
@@ -334,7 +352,7 @@ const duplicatePlanFiles = (groups: ReadonlyArray<CommitGroup>): Array<string> =
     .sort();
 };
 
-export const validateCommitPlan = (
+const validateCommitPlan = (
   vcs: VcsClient,
   groups: ReadonlyArray<CommitGroup>,
 ): Effect.Effect<ReadonlyArray<CommitGroup>, CommitPlanError> => {
@@ -401,8 +419,19 @@ interface RejectedCommitMessageResult {
 const isRetryableHookRejection = (error: unknown): error is RetryableHookRejectionError =>
   RetryableHookRejectionError.is(error);
 
-export interface CommitServiceShape {
-  readonly run: (request: CommitRequest) => Effect.Effect<CommitResponse, unknown>;
+interface CommitServiceShape {
+  readonly run: (
+    request: CommitRequest,
+  ) => Effect.Effect<
+    CommitResponse,
+    | ApiError
+    | AiError.AiError
+    | CommitPlanError
+    | ConfigError
+    | HookBlockedError
+    | ProcessExecutionError
+    | UnsupportedFeatureError
+  >;
 }
 
 export class CommitService extends ServiceMap.Service<CommitService, CommitServiceShape>()(
@@ -716,52 +745,59 @@ export const CommitServiceLive = Layer.effect(
       request: CommitRequest,
       config: ProjectConfig,
     ) {
-      const { promptStaged, promptUnstaged } = yield* Effect.gen(function* () {
-        const preStaged = yield* request.vcs.stagedDiff(request.cwd);
+      const { originalStagedPatch, originalUntrackedFiles, stagedChanges, unstagedChanges } =
+        yield* Effect.gen(function* () {
+          const preStaged = yield* request.vcs.stagedDiff(request.cwd);
 
-        let staged = preStaged;
-        let unstaged = request.noStage
-          ? ({ files: [], content: "", lines: 0 } satisfies VcsDiff)
-          : yield* request.vcs.unstagedDiff(request.cwd);
+          if (request.noStage && preStaged.files.length === 0) {
+            return yield* new UnsupportedFeatureError({
+              message: "no staged changes (hint: stage files with git add, or remove --no-stage)",
+            });
+          }
 
-        if (!request.noStage) {
-          yield* request.vcs.addAll(request.cwd);
-          const full = yield* request.vcs.stagedDiff(request.cwd);
-
-          if (full.files.length === 0) {
+          const unstaged = request.noStage
+            ? emptyDiff()
+            : yield* request.vcs.unstagedDiff(request.cwd);
+          const untrackedFiles = request.noStage
+            ? []
+            : yield* request.vcs.untrackedFiles(request.cwd);
+          if (
+            preStaged.files.length === 0 &&
+            unstaged.files.length === 0 &&
+            untrackedFiles.length === 0
+          ) {
             return yield* new UnsupportedFeatureError({ message: "no changes" });
           }
 
-          if (preStaged.files.length === 0) {
-            staged = { files: [], content: "", lines: 0 };
-            unstaged = full;
-          } else {
-            const userStaged = new Set(preStaged.files);
-            const newFiles = full.files.filter((file) => !userStaged.has(file));
-            staged = preStaged;
-            unstaged =
-              newFiles.length === 0
-                ? { files: [], content: "", lines: 0 }
-                : yield* request.vcs.diffForFiles(request.cwd, newFiles);
-          }
-        } else if (staged.files.length === 0) {
-          return yield* new UnsupportedFeatureError({
-            message: "no staged changes (hint: stage files with git add, or remove --no-stage)",
-          });
-        }
+          const originalStagedPatch =
+            preStaged.files.length === 0
+              ? ""
+              : yield* request.vcs.exportStagedPatch(request.cwd, preStaged.files);
+          const userStaged = new Set(preStaged.files);
+          const unstagedTrackedFiles = unstaged.files.filter((file) => !userStaged.has(file));
+          const originalUntrackedFiles = untrackedFiles.filter((file) => !userStaged.has(file));
+          const trackedUnstagedChanges =
+            unstagedTrackedFiles.length === 0
+              ? emptyDiff()
+              : yield* request.vcs.diffForFiles(request.cwd, unstagedTrackedFiles, "HEAD");
+          const untrackedChanges =
+            originalUntrackedFiles.length === 0
+              ? emptyDiff()
+              : yield* request.vcs.untrackedDiff(request.cwd, originalUntrackedFiles);
+          const unstagedFiles = [
+            ...new Set([...trackedUnstagedChanges.files, ...untrackedChanges.files]),
+          ];
 
-        const promptStaged =
-          request.maxDiffLines > 0
-            ? truncateDiff(filterDiffForPrompt(staged), request.maxDiffLines)
-            : filterDiffForPrompt(staged);
-
-        const promptUnstaged =
-          request.maxDiffLines > 0
-            ? truncateDiff(filterDiffForPrompt(unstaged), request.maxDiffLines)
-            : filterDiffForPrompt(unstaged);
-
-        return { promptStaged, promptUnstaged };
-      }).pipe(Effect.withSpan("Commit.ScanChanges"));
+          return {
+            originalStagedPatch,
+            originalUntrackedFiles,
+            stagedChanges: preStaged,
+            unstagedChanges:
+              unstagedFiles.length === 0
+                ? emptyDiff()
+                : mergeDiffs(trackedUnstagedChanges, untrackedChanges),
+          };
+        }).pipe(Effect.withSpan("Commit.ScanChanges"));
 
       const configWithScopes =
         config.scopes.length > 0
@@ -770,8 +806,8 @@ export const CommitServiceLive = Layer.effect(
 
       let groups = yield* planGroups(
         request.provider,
-        promptStaged.files,
-        promptUnstaged.files,
+        stagedChanges.files,
+        unstagedChanges.files,
         request.intent,
         configWithScopes,
       ).pipe(Effect.flatMap((planned) => validateCommitPlan(request.vcs, planned)));
@@ -787,7 +823,7 @@ export const CommitServiceLive = Layer.effect(
           "Commit.RefreshScopes",
         );
         groups = yield* Effect.withSpan(
-          planGroups(request.provider, promptStaged.files, promptUnstaged.files, request.intent, {
+          planGroups(request.provider, stagedChanges.files, unstagedChanges.files, request.intent, {
             ...configWithScopes,
             scopes: refreshedScopes,
           }).pipe(Effect.flatMap((planned) => validateCommitPlan(request.vcs, planned))),
@@ -800,6 +836,8 @@ export const CommitServiceLive = Layer.effect(
       let replanCount = 0;
       let inheritedFeedback = "";
       let remaining = [...groups];
+      const originalStagedSet = new Set(stagedChanges.files);
+      const originalUntrackedSet = new Set(originalUntrackedFiles);
 
       while (remaining.length > 0) {
         const group = remaining.shift();
@@ -807,9 +845,36 @@ export const CommitServiceLive = Layer.effect(
           break;
         }
 
-        yield* request.vcs.unstageAll(request.cwd);
-        yield* request.vcs.stageFiles(request.cwd, group.files);
-        const groupDiff = yield* request.vcs.stagedDiff(request.cwd);
+        const stagedFiles = group.files.filter((file) => originalStagedSet.has(file));
+        const unstagedFiles = group.files.filter((file) => !originalStagedSet.has(file));
+        const untrackedGroupFiles = unstagedFiles.filter((file) => originalUntrackedSet.has(file));
+        const trackedGroupFiles = unstagedFiles.filter((file) => !originalUntrackedSet.has(file));
+
+        const groupDiff = request.dryRun
+          ? yield* Effect.all([
+              stagedFiles.length === 0
+                ? Effect.succeed(emptyDiff())
+                : request.vcs.diffForFiles(request.cwd, stagedFiles),
+              trackedGroupFiles.length === 0
+                ? Effect.succeed(emptyDiff())
+                : request.vcs.diffForFiles(request.cwd, trackedGroupFiles, "HEAD"),
+              untrackedGroupFiles.length === 0
+                ? Effect.succeed(emptyDiff())
+                : request.vcs.untrackedDiff(request.cwd, untrackedGroupFiles),
+            ]).pipe(
+              Effect.map(([staged, tracked, untracked]) => mergeDiffs(staged, tracked, untracked)),
+            )
+          : yield* Effect.gen(function* () {
+              yield* request.vcs.unstageAll(request.cwd);
+              if (stagedFiles.length > 0 && originalStagedPatch.length > 0) {
+                yield* request.vcs.applyStagedPatch(request.cwd, originalStagedPatch);
+              }
+              if (unstagedFiles.length > 0) {
+                yield* request.vcs.stageFiles(request.cwd, unstagedFiles);
+              }
+              return yield* request.vcs.stagedDiff(request.cwd);
+            });
+
         if (groupDiff.files.length === 0) {
           continue;
         }

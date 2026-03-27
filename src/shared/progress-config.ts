@@ -84,7 +84,7 @@ const titleCase = (value: string): string =>
 const formatFriendlySpanName = (name: string, attributes: ReadonlyMap<string, unknown>): string => {
   const friendly = friendlySpanNames[name];
   if (friendly != null) {
-    if (name === "hooks.execute") {
+    if (name === "Hooks.Execute") {
       const hookType = attributes.get("hook_type");
       return hookType === "conventional" ? "Validate conventional commit" : friendly;
     }

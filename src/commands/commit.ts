@@ -1,7 +1,6 @@
 import { Console, Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
-import { loadProjectConfig } from "../config/project.ts";
-import { resolveProviderConfig } from "../config/provider.ts";
+import { ConfigService } from "../config/service.ts";
 import { parseTrailerText, type Trailer } from "../domain/commit.ts";
 import { emptyProjectConfig } from "../domain/project.ts";
 import { CommitService } from "../services/commit-service.ts";
@@ -13,7 +12,6 @@ import {
   apiKeyFlag,
   baseUrlFlag,
   cwdFlag,
-  freeFlag,
   modelFlag,
   toOptionalString,
   vcsFlag,
@@ -67,7 +65,6 @@ export const commandCommit = Command.make(
     apiKey: apiKeyFlag,
     baseUrl: baseUrlFlag,
     model: modelFlag,
-    free: freeFlag,
     intent: Flag.optional(
       Flag.string("intent").pipe(Flag.withDescription("Describe the intent of the change.")),
     ),
@@ -98,6 +95,7 @@ export const commandCommit = Command.make(
     ),
   },
   Effect.fn("Command.Commit")(function* (input) {
+    const configService = yield* ConfigService;
     yield* Effect.annotateCurrentSpan({
       amend: input.amend,
       dry_run: input.dryRun,
@@ -119,7 +117,7 @@ export const commandCommit = Command.make(
 
     yield* Effect.annotateCurrentSpan({ vcs: vcsKind });
 
-    const provider = yield* resolveProviderConfig({
+    const provider = yield* configService.resolveProviderConfig({
       cwd: input.cwd,
       vcs: vcsKind,
       apiKey: toOptionalString(input.apiKey),
@@ -130,12 +128,13 @@ export const commandCommit = Command.make(
     if (provider.apiKey.length === 0) {
       return yield* new ConfigError({
         message:
-          "no API key configured (hint: set --api-key, add api_key to ~/.config/ai-commit/config.yml, or use build-time embedded credentials)",
+          "no API key configured (hint: set --api-key, add api_key to ~/.config/ai-commit/config.json, or use build-time embedded credentials)",
       });
     }
 
     const repoRoot = yield* vcs.repoRoot(input.cwd);
-    const projectConfig = (yield* loadProjectConfig(repoRoot)) ?? emptyProjectConfig();
+    const projectConfig =
+      (yield* configService.loadProjectConfig(repoRoot)) ?? emptyProjectConfig();
 
     const trailers = yield* parseTrailers(
       input.coAuthor,

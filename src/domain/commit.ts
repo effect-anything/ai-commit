@@ -41,12 +41,6 @@ export const CommitGroup = Schema.Struct({
 
 export type CommitGroup = typeof CommitGroup.Type;
 
-export const CommitPlan = Schema.Struct({
-  groups: Schema.Array(CommitGroup),
-});
-
-export type CommitPlan = typeof CommitPlan.Type;
-
 export const SingleCommitResult = Schema.Struct({
   title: Schema.String,
   bullets: Schema.Array(Schema.String),

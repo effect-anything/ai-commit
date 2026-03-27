@@ -103,17 +103,17 @@ const decodeProjectScopesResponse = Schema.decodeEffect(ProjectScopesResponse);
 const isRetryableInvalidModelOutput = (error: ApiError | AiError.AiError): boolean =>
   ApiError.is(error) || (AiError.isAiError(error) && error.reason.isRetryable);
 
-export interface GenerateProjectScopesInput {
+interface GenerateProjectScopesInput {
   readonly provider: ProviderConfig;
   readonly vcs: VcsClient;
   readonly cwd: string;
   readonly maxCommits: number;
 }
 
-export interface ScopeServiceShape {
+interface ScopeServiceShape {
   readonly generateProjectScopes: (
     input: GenerateProjectScopesInput,
-  ) => Effect.Effect<ReadonlyArray<ProjectScope>, ApiError | AiError.AiError | unknown>;
+  ) => Effect.Effect<ReadonlyArray<ProjectScope>, ApiError | AiError.AiError>;
 }
 
 export class ScopeService extends ServiceMap.Service<ScopeService, ScopeServiceShape>()(
@@ -132,7 +132,15 @@ export const ScopeServiceLive = Layer.effect(
         vcs.commitLog(cwd, maxCommits),
         vcs.topLevelDirs(cwd),
         vcs.projectFiles(cwd),
-      ]);
+      ]).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ApiError({
+              message: "failed to inspect repository for scope generation",
+              cause,
+            }),
+        ),
+      );
 
       const scopes = yield* llmClient
         .call({
@@ -161,6 +169,3 @@ export const ScopeServiceLive = Layer.effect(
     } satisfies ScopeServiceShape;
   }),
 );
-
-export const formatScopeNames = (scopes: ReadonlyArray<ProjectScope>): Array<string> =>
-  scopes.map((scope) => scope.name);
