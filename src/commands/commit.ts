@@ -4,7 +4,7 @@ import { loadProjectConfig } from "../config/project.ts";
 import { resolveProviderConfig } from "../config/provider.ts";
 import { parseTrailerText, type Trailer } from "../domain/commit.ts";
 import { emptyProjectConfig } from "../domain/project.ts";
-import { runCommitService } from "../services/commit-service.ts";
+import { CommitService } from "../services/commit-service.ts";
 import { Vcs } from "../services/vcs.ts";
 import { ConfigError } from "../shared/errors.ts";
 import { printCommitResult, printDryRunResult } from "../shared/output.ts";
@@ -144,7 +144,8 @@ export const commandCommit = Command.make(
       provider.noModelCoAuthor || projectConfig.noModelCoAuthor,
     );
 
-    const commits = yield* runCommitService({
+    const commitService = yield* CommitService;
+    const commits = yield* commitService.run({
       cwd: repoRoot,
       provider,
       vcs,

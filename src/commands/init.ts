@@ -8,8 +8,8 @@ import {
 } from "../config/project.ts";
 import { resolveProviderConfig } from "../config/provider.ts";
 import { emptyProjectConfig } from "../domain/project.ts";
-import { generateGitignore } from "../services/gitignore-service.ts";
-import { generateProjectScopes } from "../services/scope-service.ts";
+import { GitignoreService } from "../services/gitignore-service.ts";
+import { ScopeService } from "../services/scope-service.ts";
 import { Vcs } from "../services/vcs.ts";
 import { ConfigError } from "../shared/errors.ts";
 import { parseCsvValues } from "../shared/text.ts";
@@ -115,13 +115,25 @@ export const commandInit = Command.make(
       });
     }
 
+    const gitignoreService = yield* GitignoreService;
+    const scopeService = yield* ScopeService;
+
     if (doGitignore || fullWizard) {
-      const techs = yield* generateGitignore(provider, vcs, repoRoot);
+      const techs = yield* gitignoreService.generateGitignore({
+        provider,
+        vcs,
+        cwd: repoRoot,
+      });
       yield* Console.log(`.gitignore updated: ${techs.join(", ")}`);
     }
 
     if (doScope || fullWizard) {
-      const scopes = yield* generateProjectScopes(provider, vcs, repoRoot, input.maxCommits);
+      const scopes = yield* scopeService.generateProjectScopes({
+        provider,
+        vcs,
+        cwd: repoRoot,
+        maxCommits: input.maxCommits,
+      });
       yield* mergeScopes(configPath, scopes);
       yield* Console.log(`scopes written to ${configPath}`);
     }

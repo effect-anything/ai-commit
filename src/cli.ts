@@ -5,17 +5,40 @@ import { CliError, Command } from "effect/unstable/cli";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import PackageJson from "../package.json" with { type: "json" };
 import { commandRoot } from "./commands/root.ts";
+import { CommitLlmServicesLive, CommitServiceLive } from "./services/commit-service.ts";
+import { GitignoreServiceLive } from "./services/gitignore-service.ts";
+import { HookServiceLive } from "./services/hooks.ts";
+import { LlmClientLive } from "./services/openai-client.ts";
+import { ScopeServiceLive } from "./services/scope-service.ts";
 import { VcsLive } from "./services/vcs.ts";
 import { renderError } from "./shared/errors.ts";
 import { gitAgentProgressRenderConfig } from "./shared/progress-config.ts";
 import { makeProgressLayer } from "./shared/tracing.ts";
 
-const Live = Layer.mergeAll(
-  NodeServices.layer,
-  FetchHttpClient.layer,
-  VcsLive.pipe(Layer.provide(NodeServices.layer)),
+const PlatformLive = Layer.mergeAll(NodeServices.layer, FetchHttpClient.layer);
+
+const CoreServicesLive = Layer.mergeAll(VcsLive, HookServiceLive, LlmClientLive).pipe(
+  Layer.provideMerge(PlatformLive),
+);
+
+const FeatureServicesLive = Layer.mergeAll(
+  CommitLlmServicesLive,
+  ScopeServiceLive,
+  GitignoreServiceLive,
+).pipe(Layer.provideMerge(CoreServicesLive));
+
+const CommitRuntimeLive = CommitServiceLive.pipe(
+  Layer.provideMerge(Layer.mergeAll(CoreServicesLive, FeatureServicesLive)),
+);
+
+const ServicesLive = Layer.mergeAll(
+  CoreServicesLive,
+  FeatureServicesLive,
+  CommitRuntimeLive,
   makeProgressLayer(gitAgentProgressRenderConfig),
-).pipe(Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv())));
+);
+
+const Live = ServicesLive.pipe(Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv())));
 
 const program = Command.run(commandRoot, {
   version: PackageJson.version,

@@ -17,7 +17,7 @@ import {
   writeUserField,
 } from "../config/provider.ts";
 import { localConfigPath, projectConfigWritePath, writeProjectField } from "../config/project.ts";
-import { installHookValue } from "../services/hooks.ts";
+import { HookService } from "../services/hooks.ts";
 import { Vcs } from "../services/vcs.ts";
 import {
   apiKeyFlag,
@@ -124,7 +124,8 @@ const configSet = Command.make(
     const vcsService = yield* Vcs;
     const { client: vcs } = yield* vcsService.resolve(input.cwd, toOptionalString(input.vcs));
     const repoRoot = yield* vcs.repoRoot(input.cwd);
-    const prepared = yield* installHookValue(repoRoot, key, value);
+    const hookService = yield* HookService;
+    const prepared = yield* hookService.installValue(repoRoot, key, value);
     if (prepared.installedFrom != null) {
       yield* Console.log(`installed hook: ${prepared.installedFrom}`);
     }
