@@ -1,15 +1,22 @@
-export interface ProjectScope {
-  readonly name: string;
-  readonly description?: string;
-}
+import { Schema, SchemaTransformation } from "effect";
 
-export interface ProjectConfig {
-  readonly scopes: ReadonlyArray<ProjectScope>;
-  readonly hooks: ReadonlyArray<string>;
-  readonly maxDiffLines: number;
-  readonly noGitAgentCoAuthor: boolean;
-  readonly noModelCoAuthor: boolean;
-}
+const TrimmedString = Schema.String.pipe(Schema.decode(SchemaTransformation.trim()));
+const NonEmptyTrimmedString = TrimmedString.check(Schema.isNonEmpty());
+
+export class ProjectScope extends Schema.Class<ProjectScope>("ProjectScope")({
+  name: NonEmptyTrimmedString,
+  description: Schema.optionalKey(NonEmptyTrimmedString),
+}) {}
+
+export const ProjectConfig = Schema.Struct({
+  scopes: Schema.Array(ProjectScope),
+  hooks: Schema.Array(NonEmptyTrimmedString),
+  maxDiffLines: Schema.Int,
+  noGitAgentCoAuthor: Schema.Boolean,
+  noModelCoAuthor: Schema.Boolean,
+});
+
+export type ProjectConfig = typeof ProjectConfig.Type;
 
 export const emptyProjectConfig = (): ProjectConfig => ({
   scopes: [],

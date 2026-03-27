@@ -1,7 +1,11 @@
-export interface Trailer {
-  readonly key: string;
-  readonly value: string;
-}
+import { Schema } from "effect";
+
+export const Trailer = Schema.Struct({
+  key: Schema.String,
+  value: Schema.String,
+});
+
+export type Trailer = typeof Trailer.Type;
 
 export const parseTrailerText = (input: string): Trailer | undefined => {
   const separator = ": ";
@@ -22,28 +26,40 @@ export const parseTrailerText = (input: string): Trailer | undefined => {
   };
 };
 
-export interface CommitMessage {
-  readonly title: string;
-  readonly bullets: ReadonlyArray<string>;
-  readonly explanation: string;
-}
+export const CommitMessage = Schema.Struct({
+  title: Schema.String,
+  bullets: Schema.Array(Schema.String),
+  explanation: Schema.String,
+});
 
-export interface CommitGroup {
-  readonly files: ReadonlyArray<string>;
-  readonly message: CommitMessage | undefined;
-}
+export type CommitMessage = typeof CommitMessage.Type;
 
-export interface CommitPlan {
-  readonly groups: ReadonlyArray<CommitGroup>;
-}
+export const CommitGroup = Schema.Struct({
+  files: Schema.Array(Schema.String),
+  message: CommitMessage.pipe(Schema.UndefinedOr),
+});
 
-export interface SingleCommitResult {
-  readonly title: string;
-  readonly bullets: ReadonlyArray<string>;
-  readonly explanation: string;
-  readonly files: ReadonlyArray<string>;
-  readonly output: string | undefined;
-}
+export type CommitGroup = typeof CommitGroup.Type;
+
+export const CommitPlan = Schema.Struct({
+  groups: Schema.Array(CommitGroup),
+});
+
+export type CommitPlan = typeof CommitPlan.Type;
+
+export const SingleCommitResult = Schema.Struct({
+  title: Schema.String,
+  bullets: Schema.Array(Schema.String),
+  explanation: Schema.String,
+  files: Schema.Array(Schema.String),
+  output: Schema.String.pipe(Schema.UndefinedOr),
+});
+
+export type SingleCommitResult = typeof SingleCommitResult.Type;
+
+export const CommitResponse = Schema.Array(SingleCommitResult);
+
+export type CommitResponse = typeof CommitResponse.Type;
 
 export const renderCommitBody = (message: CommitMessage): string => {
   const bulletSection = message.bullets.map((bullet) => `- ${bullet}`).join("\n");
