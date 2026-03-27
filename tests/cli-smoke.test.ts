@@ -105,9 +105,9 @@ describe.concurrent("cli smoke", () => {
     const result = runCli(["config", "show", "--cwd", dir], {
       env: {
         XDG_CONFIG_HOME: xdgHome,
-        OPENAI_COMPACT_API_KEY: "",
-        OPENAI_COMPACT_API_BASE_URL: "",
-        OPENAI_COMPACT_MODEL: "",
+        OPENAI_API_KEY: "",
+        OPENAI_API_BASE_URL: "",
+        OPENAI_MODEL: "",
         GIT_AGENT_BUILD_API_KEY: "",
         GIT_AGENT_BUILD_BASE_URL: "https://build.example/v1",
         GIT_AGENT_BUILD_MODEL: "build-model",
