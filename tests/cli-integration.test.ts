@@ -16,8 +16,8 @@ describe.concurrent("CLI integration", () => {
       "get prefers local hook over project hook",
       Effect.fn(function* () {
         const repo = yield* createGitRepo();
-        yield* writeTextFile(repo, ".ai-commit/config.yml", "hook:\n  - conventional\n");
-        yield* writeTextFile(repo, ".ai-commit/config.local.yml", "hook:\n  - empty\n");
+        yield* writeTextFile(repo, ".ai-commit/config.json", '{\n  "hook": ["conventional"]\n}\n');
+        yield* writeTextFile(repo, ".ai-commit/config.local.json", '{\n  "hook": ["empty"]\n}\n');
 
         const result = yield* runCli(["config", "get", "hook"], {
           cwd: repo,
@@ -43,7 +43,7 @@ describe.concurrent("CLI integration", () => {
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain(`installed hook: ${hookPath}`);
         expect(yield* fileExists(repo, ".ai-commit/hooks/pre-commit")).toBe(true);
-        expect(yield* readTextFile(repo, ".ai-commit/config.yml")).toContain(hookPath);
+        expect(yield* readTextFile(repo, ".ai-commit/config.json")).toContain(hookPath);
       }),
     );
 
@@ -78,8 +78,8 @@ describe.concurrent("CLI integration", () => {
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain("set model = gpt-4o-mini  (user)");
 
-        const userConfig = yield* readTextFile(repo, "../.xdg/ai-commit/config.yml");
-        expect(userConfig).toContain("model: gpt-4o-mini");
+        const userConfig = yield* readTextFile(repo, "../.xdg/ai-commit/config.json");
+        expect(userConfig).toContain('"model": "gpt-4o-mini"');
       }),
     );
 
@@ -93,7 +93,7 @@ describe.concurrent("CLI integration", () => {
         );
 
         expect(result.exitCode).not.toBe(0);
-        expect(yield* fileExists(repo, ".ai-commit/config.yml")).toBe(false);
+        expect(yield* fileExists(repo, ".ai-commit/config.json")).toBe(false);
       }),
     );
 

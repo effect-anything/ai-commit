@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { describe, expect, layer } from "@effect/vitest";
 import { Effect } from "effect";
+import { execFileSync } from "node:child_process";
 import {
   createGitRepo,
   fileExists,
@@ -28,7 +29,7 @@ const seedGitRepoWithScopes = Effect.fn(function* () {
   const repo = yield* seedGitRepo();
   yield* writeTextFile(
     repo,
-    ".ai-commit/config.yml",
+    ".ai-commit/config.json",
     projectScopesConfig([
       ["api", "Backend API handlers"],
       ["web", "Frontend pages"],
@@ -37,6 +38,19 @@ const seedGitRepoWithScopes = Effect.fn(function* () {
   );
   return repo;
 });
+
+const stagePartialHunk = (cwd: string, relativePath: string, from: string, to: string): void => {
+  execFileSync("git", ["apply", "--cached", "--unidiff-zero", "-"], {
+    cwd,
+    input:
+      `diff --git a/${relativePath} b/${relativePath}\n` +
+      `--- a/${relativePath}\n` +
+      `+++ b/${relativePath}\n` +
+      "@@ -1 +1 @@\n" +
+      `-${from}\n` +
+      `+${to}\n`,
+  });
+};
 
 describe.concurrent("CLI integration (git)", () => {
   layer(NodeServices.layer)((it) => {
@@ -74,10 +88,10 @@ describe.concurrent("CLI integration (git)", () => {
 
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain("scopes written");
-        const config = yield* readTextFile(repo, ".ai-commit/config.yml");
-        expect(config).toContain("name: api");
-        expect(config).toContain("description: Backend API handlers");
-        expect(config).toContain("name: web");
+        const config = yield* readTextFile(repo, ".ai-commit/config.json");
+        expect(config).toContain('"name": "api"');
+        expect(config).toContain('"description": "Backend API handlers"');
+        expect(config).toContain('"name": "web"');
         expect(llm.requests).toHaveLength(1);
       }),
     );
@@ -130,6 +144,49 @@ describe.concurrent("CLI integration (git)", () => {
         expect(content).toContain("### custom rules ###");
         expect(content).toContain("custom.cache");
         expect(gitignore.requests).toEqual(["/node,visualstudiocode"]);
+      }),
+    );
+
+    it.effect(
+      "git init --gitignore works when project config already exists",
+      Effect.fn(function* () {
+        const repo = yield* seedGitRepo();
+        yield* writeTextFile(repo, ".ai-commit/config.json", '{\n  "hook": ["conventional"]\n}\n');
+
+        const llm = yield* startMockLlmServer([
+          {
+            content: {
+              technologies: ["node"],
+            },
+          },
+        ]);
+        const gitignore = yield* startMockGitignoreServer({
+          node: "# Created by https://www.toptal.com/developers/gitignore/api/node\nnode_modules/\n",
+        });
+
+        const result = yield* runCli(
+          [
+            "init",
+            "--gitignore",
+            "--api-key",
+            "test-key",
+            "--base-url",
+            llm.baseUrl,
+            "--model",
+            "test-model",
+          ],
+          {
+            cwd: repo,
+            env: {
+              GIT_AGENT_GITIGNORE_BASE_URL: gitignore.baseUrl,
+            },
+            httpClientLayer: makeMockHttpClientLayer(llm.handler, gitignore.handler),
+          },
+        );
+
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain(".gitignore updated: node");
+        expect(yield* readTextFile(repo, ".ai-commit/config.json")).toContain("conventional");
       }),
     );
 
@@ -206,6 +263,66 @@ describe.concurrent("CLI integration (git)", () => {
     );
 
     it.effect(
+      "git commit --dry-run preserves a partially staged index",
+      Effect.fn(function* () {
+        const repo = yield* createGitRepo();
+        yield* writeTextFile(
+          repo,
+          "src/app.ts",
+          "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
+        );
+        yield* gitCommitAll(repo, "chore: seed repo");
+        yield* writeTextFile(
+          repo,
+          ".ai-commit/config.json",
+          projectScopesConfig([["core", "Core"]]),
+        );
+        yield* writeTextFile(
+          repo,
+          "src/app.ts",
+          "ONE\ntwo\nthree\nfour\nfive\nsix\nseven\nEIGHT\n",
+        );
+        stagePartialHunk(repo, "src/app.ts", "one", "ONE");
+
+        const llm = yield* startMockLlmServer([
+          {
+            content: {
+              title: "fix(core): preserve staged patch",
+              bullets: ["Keep the dry run read-only"],
+              explanation: "Ensures dry-run does not rewrite the git index.",
+            },
+          },
+        ]);
+
+        const beforeCached = yield* git(repo, ["diff", "--cached", "--binary"]);
+        const beforeUnstaged = yield* git(repo, ["diff", "--binary"]);
+        const result = yield* runCli(
+          [
+            "commit",
+            "--dry-run",
+            "--no-stage",
+            "--api-key",
+            "test-key",
+            "--base-url",
+            llm.baseUrl,
+            "--model",
+            "test-model",
+          ],
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
+        );
+        const afterCached = yield* git(repo, ["diff", "--cached", "--binary"]);
+        const afterUnstaged = yield* git(repo, ["diff", "--binary"]);
+
+        expect(result.exitCode).toBe(0);
+        expect(afterCached.stdout).toBe(beforeCached.stdout);
+        expect(afterUnstaged.stdout).toBe(beforeUnstaged.stdout);
+      }),
+    );
+
+    it.effect(
       "git commit rejects --amend and --no-stage together",
       Effect.fn(function* () {
         const repo = yield* createGitRepo();
@@ -226,6 +343,69 @@ describe.concurrent("CLI integration (git)", () => {
 
         expect(result.exitCode).toBe(1);
         expect(result.stderr).toContain("--amend and --no-stage cannot be used together");
+      }),
+    );
+
+    it.effect(
+      "git commit --no-stage preserves unstaged hunks in a partially staged file",
+      Effect.fn(function* () {
+        const repo = yield* createGitRepo();
+        yield* writeTextFile(
+          repo,
+          "src/app.ts",
+          "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
+        );
+        yield* gitCommitAll(repo, "chore: seed repo");
+        yield* writeTextFile(
+          repo,
+          ".ai-commit/config.json",
+          projectScopesConfig([["core", "Core"]]),
+        );
+        yield* writeTextFile(
+          repo,
+          "src/app.ts",
+          "ONE\ntwo\nthree\nfour\nfive\nsix\nseven\nEIGHT\n",
+        );
+        stagePartialHunk(repo, "src/app.ts", "one", "ONE");
+
+        const llm = yield* startMockLlmServer([
+          {
+            content: {
+              title: "fix(core): preserve staged hunk",
+              bullets: ["Commit only the staged part"],
+              explanation: "Leaves the remaining working tree change untouched.",
+            },
+          },
+        ]);
+
+        const result = yield* runCli(
+          [
+            "commit",
+            "--no-stage",
+            "--api-key",
+            "test-key",
+            "--base-url",
+            llm.baseUrl,
+            "--model",
+            "test-model",
+          ],
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
+        );
+
+        const committed = yield* git(repo, ["show", "HEAD:src/app.ts"]);
+        const unstaged = yield* git(repo, ["diff", "--", "src/app.ts"]);
+        const cached = yield* git(repo, ["diff", "--cached", "--", "src/app.ts"]);
+
+        expect(result.exitCode).toBe(0);
+        expect(committed.stdout).toBe("ONE\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n");
+        expect(unstaged.stdout).toContain("-eight");
+        expect(unstaged.stdout).toContain("+EIGHT");
+        expect(unstaged.stdout).not.toContain("-one");
+        expect(unstaged.stdout).not.toContain("+ONE");
+        expect(cached.stdout).toBe("");
       }),
     );
 
@@ -342,7 +522,7 @@ describe.concurrent("CLI integration (git)", () => {
 
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain("feat(api): update routes");
-        expect(yield* fileExists(repo, ".ai-commit/config.yml")).toBe(false);
+        expect(yield* fileExists(repo, ".ai-commit/config.json")).toBe(false);
         expect(llm.requests).toHaveLength(3);
       }),
     );
@@ -444,8 +624,8 @@ describe.concurrent("CLI integration (git)", () => {
         const repo = yield* createGitRepo();
         yield* writeTextFile(
           repo,
-          ".ai-commit/config.yml",
-          "scopes:\n  - name: core\n    description: Shared application logic\nhook:\n  - conventional\n",
+          ".ai-commit/config.json",
+          '{\n  "scopes": [\n    {\n      "name": "core",\n      "description": "Shared application logic"\n    }\n  ],\n  "hook": ["conventional"]\n}\n',
         );
         yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");
         yield* writeTextFile(repo, "src/extra.ts", "export const extra = 'base';\n");
@@ -609,8 +789,8 @@ describe.concurrent("CLI integration (git)", () => {
         const repo = yield* createGitRepo();
         yield* writeTextFile(
           repo,
-          ".ai-commit/config.yml",
-          "scopes:\n  - name: core\n    description: Shared application logic\nhook:\n  - conventional\n",
+          ".ai-commit/config.json",
+          '{\n  "scopes": [\n    {\n      "name": "core",\n      "description": "Shared application logic"\n    }\n  ],\n  "hook": ["conventional"]\n}\n',
         );
         yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");
         yield* writeTextFile(repo, "src/extra.ts", "export const extra = 'base';\n");

@@ -27,13 +27,13 @@ const seedJjRepoWithScopes = Effect.fn(function* () {
   const repo = yield* seedJjRepo();
   yield* writeTextFile(
     repo,
-    ".ai-commit/config.yml",
+    ".ai-commit/config.json",
     projectScopesConfig([
       ["cli", "Command line flows"],
       ["core", "Shared application logic"],
     ]),
   );
-  yield* jjCommitAll(repo, "chore: add repo config", [".ai-commit/config.yml"]);
+  yield* jjCommitAll(repo, "chore: add repo config", [".ai-commit/config.json"]);
   return repo;
 });
 
@@ -77,11 +77,11 @@ describe.concurrent("CLI integration (jj)", () => {
         expect(result.stdout).toContain(".gitignore updated: node");
         expect(result.stdout).toContain("scopes written");
 
-        const config = yield* readTextFile(repo, ".ai-commit/config.yml");
+        const config = yield* readTextFile(repo, ".ai-commit/config.json");
         const ignore = yield* readTextFile(repo, ".gitignore");
-        expect(config).toContain("name: core");
-        expect(config).toContain("hook:");
-        expect(config).toContain("- conventional");
+        expect(config).toContain('"name": "core"');
+        expect(config).toContain('"hook": [');
+        expect(config).toContain('"conventional"');
         expect(ignore).toContain("node_modules/");
         expect(llm.requests).toHaveLength(2);
       }),
@@ -359,11 +359,11 @@ describe.concurrent("CLI integration (jj)", () => {
         const repo = yield* createJjRepo();
         yield* writeTextFile(
           repo,
-          ".ai-commit/config.yml",
-          "scopes:\n  - name: core\n    description: Shared application logic\nhook:\n  - conventional\n",
+          ".ai-commit/config.json",
+          '{\n  "scopes": [\n    {\n      "name": "core",\n      "description": "Shared application logic"\n    }\n  ],\n  "hook": ["conventional"]\n}\n',
         );
         yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");
-        yield* jjCommitAll(repo, "chore: seed repo", [".ai-commit/config.yml", "src/app.ts"]);
+        yield* jjCommitAll(repo, "chore: seed repo", [".ai-commit/config.json", "src/app.ts"]);
         yield* writeTextFile(repo, "src/app.ts", "export const value = 'next';\n");
 
         const firstTitle =
@@ -429,11 +429,11 @@ describe.concurrent("CLI integration (jj)", () => {
         const repo = yield* createJjRepo();
         yield* writeTextFile(
           repo,
-          ".ai-commit/config.yml",
-          "scopes:\n  - name: core\n    description: Shared application logic\nhook:\n  - conventional\n",
+          ".ai-commit/config.json",
+          '{\n  "scopes": [\n    {\n      "name": "core",\n      "description": "Shared application logic"\n    }\n  ],\n  "hook": ["conventional"]\n}\n',
         );
         yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");
-        yield* jjCommitAll(repo, "chore: seed repo", [".ai-commit/config.yml", "src/app.ts"]);
+        yield* jjCommitAll(repo, "chore: seed repo", [".ai-commit/config.json", "src/app.ts"]);
         yield* writeTextFile(repo, "src/app.ts", "export const value = 'next';\n");
 
         const badMessage = {

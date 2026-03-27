@@ -11,21 +11,21 @@ const mockGitignoreBaseUrl = "https://mock-gitignore.invalid";
 const textDecoder = new TextDecoder();
 let cliRunQueue: Promise<void> = Promise.resolve();
 
-export interface CliOptions {
+interface CliOptions {
   readonly cwd: string;
   readonly env?: Record<string, string | undefined> | undefined;
   readonly allowFailure?: boolean | undefined;
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient> | undefined;
 }
 
-export interface MockLlmRequest {
+interface MockLlmRequest {
   readonly path: string;
   readonly model: string;
   readonly systemPrompt: string;
   readonly userPrompt: string;
 }
 
-export interface MockLlmResponse {
+interface MockLlmResponse {
   readonly content?:
     | string
     | Record<string, unknown>
@@ -35,25 +35,25 @@ export interface MockLlmResponse {
   readonly status?: number | undefined;
 }
 
-export interface MockLlmServer {
+interface MockLlmServer {
   readonly baseUrl: string;
   readonly requests: Array<MockLlmRequest>;
   readonly remainingResponses: () => number;
   readonly handler: MockHttpHandler;
 }
 
-export interface MockGitignoreServer {
+interface MockGitignoreServer {
   readonly baseUrl: string;
   readonly requests: Array<string>;
   readonly handler: MockHttpHandler;
 }
 
-export interface MockHttpRequest {
+interface MockHttpRequest {
   readonly url: string;
   readonly body: HttpBody.HttpBody;
 }
 
-export type MockHttpHandler = (
+type MockHttpHandler = (
   request: MockHttpRequest,
 ) => Response | Promise<Response> | undefined | Promise<Response | undefined>;
 
@@ -286,9 +286,7 @@ export const runCli = (args: ReadonlyArray<string>, options: CliOptions) => {
   });
 };
 
-export const makeHttpClientLayer = (
-  handler: (request: MockHttpRequest) => Response | Promise<Response>,
-) =>
+const makeHttpClientLayer = (handler: (request: MockHttpRequest) => Response | Promise<Response>) =>
   Layer.succeed(
     HttpClient.HttpClient,
     HttpClient.make((request, url) =>
@@ -497,14 +495,16 @@ export const startMockGitignoreServer = (templates: Record<string, string>) =>
   });
 
 export const projectScopesConfig = (scopes: ReadonlyArray<readonly [string, string?]>) =>
-  [
-    "scopes:",
-    ...scopes.flatMap(([name, description]) =>
-      description == null
-        ? [`  - name: ${name}`]
-        : [`  - name: ${name}`, `    description: ${description}`],
-    ),
-  ].join("\n") + "\n";
+  `${JSON.stringify(
+    {
+      scopes: scopes.map(([name, description]) => ({
+        name,
+        ...(description == null ? {} : { description }),
+      })),
+    },
+    null,
+    2,
+  )}\n`;
 
 export const trimmedLines = (text: string) =>
   text

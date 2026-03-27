@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -71,8 +71,8 @@ describe.concurrent("cli smoke", () => {
   it("config get prefers local hook over project hook", () => {
     const dir = newGitRepo();
     mkdirSync(join(dir, ".ai-commit"), { recursive: true });
-    writeFileSync(join(dir, ".ai-commit", "config.yml"), "hook:\n  - conventional\n");
-    writeFileSync(join(dir, ".ai-commit", "config.local.yml"), "hook:\n  - empty\n");
+    writeFileSync(join(dir, ".ai-commit", "config.json"), '{\n  "hook": ["conventional"]\n}\n');
+    writeFileSync(join(dir, ".ai-commit", "config.local.json"), '{\n  "hook": ["empty"]\n}\n');
 
     const result = runCli(["config", "get", "--cwd", dir, "hook"]);
     expect(result.status).toBe(0);
@@ -128,15 +128,20 @@ describe.concurrent("cli smoke", () => {
     expect(result.stderr).toContain("--local requires at least one action flag");
   });
 
-  it("init --local reports the local config path when it already exists", () => {
+  it("init --local updates an existing local config when writing an explicit hook", () => {
     const dir = newGitRepo();
     mkdirSync(join(dir, ".ai-commit"), { recursive: true });
-    writeFileSync(join(dir, ".ai-commit", "config.local.yml"), "hook:\n  - conventional\n");
+    writeFileSync(
+      join(dir, ".ai-commit", "config.local.json"),
+      '{\n  "hook": ["conventional"]\n}\n',
+    );
 
-    const result = runCli(["init", "--cwd", dir, "--local", "--hook", "conventional"]);
+    const result = runCli(["init", "--cwd", dir, "--local", "--hook", "empty"]);
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(join(dir, ".ai-commit", "config.local.yml"));
-    expect(result.stderr).not.toContain(join(dir, ".ai-commit", "config.yml"));
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("Write hook config");
+    expect(result.stdout).not.toContain("reinitialize");
+    expect(readFileSync(join(dir, ".ai-commit", "config.local.json"), "utf8")).toContain("empty");
   });
 });
