@@ -5,6 +5,7 @@ import {
   createJjRepo,
   jj,
   jjCommitAll,
+  makeMockHttpClientLayer,
   projectScopesConfig,
   readTextFile,
   runCli,
@@ -65,6 +66,7 @@ describe.concurrent("CLI integration (jj)", () => {
             env: {
               GIT_AGENT_GITIGNORE_BASE_URL: gitignore.baseUrl,
             },
+            httpClientLayer: makeMockHttpClientLayer(llm.handler, gitignore.handler),
           },
         );
 
@@ -114,7 +116,10 @@ describe.concurrent("CLI integration (jj)", () => {
             "--model",
             "test-model",
           ],
-          { cwd: repo },
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
         );
 
         expect(result.exitCode).toBe(0);
@@ -186,7 +191,10 @@ describe.concurrent("CLI integration (jj)", () => {
             "--model",
             "test-model",
           ],
-          { cwd: repo },
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
         );
 
         expect(result.exitCode).toBe(0);
@@ -274,7 +282,10 @@ describe.concurrent("CLI integration (jj)", () => {
             "--model",
             "test-model",
           ],
-          { cwd: repo },
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
         );
 
         expect(result.exitCode).toBe(1);
@@ -316,7 +327,10 @@ describe.concurrent("CLI integration (jj)", () => {
             "--model",
             "test-model",
           ],
-          { cwd: repo },
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
         );
 
         expect(result.exitCode).toBe(0);
@@ -383,7 +397,10 @@ describe.concurrent("CLI integration (jj)", () => {
             "--model",
             "test-model",
           ],
-          { cwd: repo },
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
         );
 
         expect(result.exitCode).toBe(0);
@@ -448,7 +465,10 @@ describe.concurrent("CLI integration (jj)", () => {
             "--model",
             "test-model",
           ],
-          { cwd: repo },
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
         );
 
         expect(result.exitCode).toBe(2);

@@ -6,6 +6,7 @@ import {
   fileExists,
   git,
   gitCommitAll,
+  makeMockHttpClientLayer,
   projectScopesConfig,
   readTextFile,
   runCli,
@@ -65,7 +66,10 @@ describe.concurrent("CLI integration (git)", () => {
             "--model",
             "test-model",
           ],
-          { cwd: repo },
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
         );
 
         expect(result.exitCode).toBe(0);
@@ -112,6 +116,7 @@ describe.concurrent("CLI integration (git)", () => {
             env: {
               GIT_AGENT_GITIGNORE_BASE_URL: gitignore.baseUrl,
             },
+            httpClientLayer: makeMockHttpClientLayer(llm.handler, gitignore.handler),
           },
         );
 
@@ -273,7 +278,10 @@ describe.concurrent("CLI integration (git)", () => {
             "--model",
             "test-model",
           ],
-          { cwd: repo },
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
         );
 
         expect(result.exitCode).toBe(0);
@@ -326,7 +334,10 @@ describe.concurrent("CLI integration (git)", () => {
             "--model",
             "test-model",
           ],
-          { cwd: repo },
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
         );
 
         expect(result.exitCode).toBe(0);
@@ -386,7 +397,10 @@ describe.concurrent("CLI integration (git)", () => {
             "--trailer",
             "Reviewed-by: Test Runner",
           ],
-          { cwd: repo },
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
         );
 
         expect(result.exitCode).toBe(0);
@@ -470,7 +484,10 @@ describe.concurrent("CLI integration (git)", () => {
 
         const result = yield* runCli(
           ["commit", "--api-key", "test-key", "--base-url", llm.baseUrl, "--model", "test-model"],
-          { cwd: repo },
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
         );
 
         expect(result.exitCode).toBe(0);
@@ -523,7 +540,10 @@ describe.concurrent("CLI integration (git)", () => {
             "--model",
             "test-model",
           ],
-          { cwd: repo },
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
         );
 
         expect(result.exitCode).toBe(0);
@@ -568,7 +588,10 @@ describe.concurrent("CLI integration (git)", () => {
             "--model",
             "test-model",
           ],
-          { cwd: repo },
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
         );
 
         expect(result.exitCode).toBe(0);
@@ -644,7 +667,10 @@ describe.concurrent("CLI integration (git)", () => {
 
         const result = yield* runCli(
           ["commit", "--api-key", "test-key", "--base-url", llm.baseUrl, "--model", "test-model"],
-          { cwd: repo },
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
         );
 
         expect(result.exitCode).toBe(2);
@@ -689,7 +715,10 @@ describe.concurrent("CLI integration (git)", () => {
             "--model",
             "test-model",
           ],
-          { cwd: repo },
+          {
+            cwd: repo,
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
+          },
         );
 
         expect(result.exitCode).toBe(0);
