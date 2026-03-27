@@ -190,9 +190,9 @@ export const runCli = (args: ReadonlyArray<string>, options: CliOptions) => {
   const env = {
     PWD: options.cwd,
     XDG_CONFIG_HOME: isolatedConfigHome,
-    OPENAI_COMPACT_API_KEY: "",
-    OPENAI_COMPACT_API_BASE_URL: "",
-    OPENAI_COMPACT_MODEL: "",
+    OPENAI_API_KEY: "",
+    OPENAI_API_BASE_URL: "",
+    OPENAI_MODEL: "",
     GIT_AGENT_BUILD_API_KEY: "",
     GIT_AGENT_BUILD_BASE_URL: "",
     GIT_AGENT_BUILD_MODEL: "",
