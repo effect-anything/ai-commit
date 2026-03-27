@@ -4,8 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { defaultScopeForKey, normalizeValue, resolveKey } from "../src/config/keys";
-import { loadProjectConfig } from "../src/config/project";
+import { defaultScopeForKey, normalizeValue, resolveKey } from "../src/config/keys.ts";
+import { loadProjectConfig } from "../src/config/project.ts";
 
 const tempDirs: Array<string> = [];
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isReasoningModel } from "../src/services/openai-client";
+import { isReasoningModel } from "../src/services/openai-client.ts";
 
 describe("isReasoningModel", () => {
   it("accepts current reasoning model families", () => {

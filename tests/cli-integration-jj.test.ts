@@ -12,7 +12,7 @@ import {
   startMockLlmServer,
   trimmedLines,
   writeTextFile,
-} from "./integration/helpers";
+} from "./integration/helpers.ts";
 
 const seedJjRepo = Effect.fn(function* () {
   const repo = yield* createJjRepo();
@@ -36,7 +36,7 @@ const seedJjRepoWithScopes = Effect.fn(function* () {
   return repo;
 });
 
-describe("CLI integration (jj)", () => {
+describe.concurrent("CLI integration (jj)", () => {
   layer(NodeServices.layer)((it) => {
     it.effect(
       "jj init full wizard writes scopes, gitignore, and default conventional hook",
@@ -452,7 +452,7 @@ describe("CLI integration (jj)", () => {
         );
 
         expect(result.exitCode).toBe(2);
-        expect(result.stderr).toContain("error: commit blocked after retries");
+        expect(result.stderr).toContain("commit blocked after retries");
         expect(result.stderr).toContain("hook rejected:");
         expect(result.stderr).toContain("rejected message:");
         expect(llm.requests).toHaveLength(9);

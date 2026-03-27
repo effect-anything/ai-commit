@@ -1,12 +1,12 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import type { CommitGroup } from "../src/domain/commit";
-import type { CommitRequest } from "../src/services/commit-service";
+import type { CommitGroup } from "../src/domain/commit.ts";
+import type { CommitRequest } from "../src/services/commit-service.ts";
 import {
   ensureJjWorkingCopyMatchesPlan,
   normalizePlannedGroups,
-} from "../src/services/commit-service";
-import type { VcsClient } from "../src/services/vcs";
+} from "../src/services/commit-service.ts";
+import type { VcsClient } from "../src/services/vcs.ts";
 
 const makeRequest = (files: ReadonlyArray<string>) =>
   ({

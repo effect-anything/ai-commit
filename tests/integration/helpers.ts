@@ -4,14 +4,14 @@ import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runProcess, type ProcessResult } from "../../src/shared/process";
+import { runProcess, type ProcessResult } from "../../src/shared/process.ts";
 
 const cliEntry = fileURLToPath(new URL("../../src/cli.ts", import.meta.url));
 
 export interface CliOptions {
   readonly cwd: string;
-  readonly env?: Record<string, string | undefined>;
-  readonly allowFailure?: boolean;
+  readonly env?: Record<string, string | undefined> | undefined;
+  readonly allowFailure?: boolean | undefined;
 }
 
 export interface MockLlmRequest {
@@ -25,9 +25,10 @@ export interface MockLlmResponse {
   readonly content?:
     | string
     | Record<string, unknown>
-    | ((request: MockLlmRequest) => string | Record<string, unknown>);
-  readonly headers?: Record<string, string>;
-  readonly status?: number;
+    | ((request: MockLlmRequest) => string | Record<string, unknown>)
+    | undefined;
+  readonly headers?: Record<string, string> | undefined;
+  readonly status?: number | undefined;
 }
 
 export interface MockLlmServer {
@@ -198,7 +199,7 @@ export const jjCommitAll = (cwd: string, message: string, files: ReadonlyArray<s
 export const runCli = (args: ReadonlyArray<string>, options: CliOptions) => {
   const isolatedConfigHome = join(dirname(options.cwd), ".xdg");
   return runProcess({
-    command: "bun",
+    command: "node",
     args: [cliEntry, ...args],
     cwd: options.cwd,
     allowFailure: options.allowFailure ?? true,
@@ -235,11 +236,11 @@ export const startMockLlmServer = (responses: ReadonlyArray<MockLlmResponse>) =>
 
         const rawBody = await readRequestBody(request);
         const parsed = JSON.parse(rawBody) as {
-          model?: string;
-          input?: Array<{ role?: string; content?: unknown }>;
-          tool_choice?: unknown;
-          temperature?: number | null;
-          top_p?: number | null;
+          model?: string | undefined;
+          input?: Array<{ role?: string | undefined; content?: unknown | undefined }> | undefined;
+          tool_choice?: unknown | undefined;
+          temperature?: number | null | undefined;
+          top_p?: number | null | undefined;
         };
         const input = Array.isArray(parsed.input) ? parsed.input : [];
         const requestInfo = {

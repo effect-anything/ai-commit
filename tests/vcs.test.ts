@@ -1,8 +1,8 @@
 import { NodeServices } from "@effect/platform-node";
 import { describe, expect, layer } from "@effect/vitest";
 import { Effect, Layer } from "effect";
-import { Vcs, VcsLive } from "../src/services/vcs";
-import { createJjRepo, writeTextFile } from "./integration/helpers";
+import { Vcs, VcsLive } from "../src/services/vcs.ts";
+import { createJjRepo, writeTextFile } from "./integration/helpers.ts";
 
 describe.concurrent("Vcs", () => {
   layer(Layer.mergeAll(NodeServices.layer, VcsLive.pipe(Layer.provide(NodeServices.layer))))(

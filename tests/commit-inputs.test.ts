@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseTrailerText } from "../src/domain/commit";
-import { countLines, parseCsvValues, wrapExplanation } from "../src/shared/text";
+import { parseTrailerText } from "../src/domain/commit.ts";
+import { countLines, parseCsvValues, wrapExplanation } from "../src/shared/text.ts";
 
 describe("repeatable commit inputs", () => {
   it("flattens repeated and comma-separated values", () => {

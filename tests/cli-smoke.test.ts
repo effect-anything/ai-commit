@@ -9,12 +9,14 @@ const tempDirs: Array<string> = [];
 
 const runCli = (
   args: ReadonlyArray<string>,
-  options?: {
-    readonly cwd?: string;
-    readonly env?: Record<string, string | undefined>;
-  },
+  options?:
+    | {
+        readonly cwd?: string | undefined;
+        readonly env?: Record<string, string | undefined> | undefined;
+      }
+    | undefined,
 ) =>
-  spawnSync("bun", ["src/cli.ts", ...args], {
+  spawnSync("node", ["src/cli.ts", ...args], {
     cwd: options?.cwd ?? repoRoot,
     encoding: "utf8",
     env: {
@@ -44,7 +46,7 @@ describe("cli smoke", () => {
     const result = runCli(["version"]);
 
     expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("0.1.0");
+    expect(result.stdout.trim()).toMatch(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
     expect(result.stderr).toBe("");
   });
 

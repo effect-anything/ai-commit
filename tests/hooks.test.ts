@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { executeHooks, type HookInput } from "../src/services/hooks";
+import { executeHooks, type HookInput } from "../src/services/hooks.ts";
 
 const runEffect = <A>(effect: Effect.Effect<A, unknown, any>) =>
   Effect.runPromise(Effect.provide(effect, NodeServices.layer) as Effect.Effect<A, unknown, never>);

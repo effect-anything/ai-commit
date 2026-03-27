@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasErrors, validateConventional } from "../src/services/conventional";
+import { hasErrors, validateConventional } from "../src/services/conventional.ts";
 
 describe("validateConventional", () => {
   it("accepts a valid conventional commit", () => {
