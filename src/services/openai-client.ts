@@ -1,5 +1,4 @@
 import * as OpenAi from "@effect/ai-openai";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import { Effect, Layer, pipe, Redacted, Schedule, ServiceMap } from "effect";
 import { AiError, LanguageModel } from "effect/unstable/ai";
 import { HttpClient } from "effect/unstable/http";
@@ -75,16 +74,14 @@ export class LlmClient extends ServiceMap.Service<LlmClient, LlmClientService>()
 export const LlmClientLive = Layer.effect(
   LlmClient,
   Effect.gen(function* () {
+    const httpClient = yield* HttpClient.HttpClient;
+
     const call: LlmClientService["call"] = Effect.fn("LLM.call")(function* ({
       provider,
       systemPrompt,
       userPrompt,
       maxOutputTokens,
     }: LlmCallInput) {
-      const runtimeLayer = makeLanguageModelLayer(provider, maxOutputTokens).pipe(
-        Layer.provideMerge(FetchHttpClient.layer),
-      );
-
       const text = yield* pipe(
         LanguageModel.generateText({
           prompt: [
@@ -94,7 +91,11 @@ export const LlmClientLive = Layer.effect(
           toolChoice: "none",
         }),
         Effect.map((response) => response.text.trim()),
-        Effect.provide(runtimeLayer),
+        Effect.provide(
+          makeLanguageModelLayer(provider, maxOutputTokens).pipe(
+            Layer.provide(Layer.succeed(HttpClient.HttpClient, httpClient)),
+          ),
+        ),
       );
 
       return text;
