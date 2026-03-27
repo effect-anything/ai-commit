@@ -1,13 +1,18 @@
-import { wrapExplanation } from "../shared/text";
+import { Schema } from "effect";
+import { wrapExplanation } from "../shared/text.ts";
 
-export interface ValidationIssue {
-  readonly severity: "error" | "warning";
-  readonly message: string;
-}
+export const ValidationIssue = Schema.Struct({
+  severity: Schema.Union([Schema.Literal("error"), Schema.Literal("warning")]),
+  message: Schema.String,
+});
 
-export interface ValidationResult {
-  readonly issues: ReadonlyArray<ValidationIssue>;
-}
+export type ValidationIssue = typeof ValidationIssue.Type;
+
+export const ValidationResult = Schema.Struct({
+  issues: Schema.Array(ValidationIssue),
+});
+
+export type ValidationResult = typeof ValidationResult.Type;
 
 const headerRegex =
   /^(feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert)(\([a-z0-9_-]+\))?!?: .+/;

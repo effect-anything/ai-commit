@@ -1,27 +1,33 @@
-import { DateTime, Duration, Effect, Schema, Schedule } from "effect";
-import type { CommitGroup, CommitMessage, SingleCommitResult, Trailer } from "../domain/commit";
-import { renderCommitBody } from "../domain/commit";
-import type { ProjectConfig } from "../domain/project";
-import { emptyProjectConfig } from "../domain/project";
-import { CommitPlanError, HookBlockedError, UnsupportedFeatureError } from "../shared/errors";
-import { countLines } from "../shared/text";
-import { executeHooks } from "./hooks";
-import { generateCommitMessage, planCommits, type ProviderConfig } from "./openai-client";
-import { generateProjectScopes } from "./scope-service";
-import type { VcsClient, VcsDiff } from "./vcs";
+import { DateTime, Duration, Effect, Ref, Schedule, Schema } from "effect";
+import type {
+  CommitGroup,
+  CommitMessage,
+  CommitResponse,
+  SingleCommitResult,
+  Trailer,
+} from "../domain/commit";
+import { renderCommitBody } from "../domain/commit.ts";
+import type { ProjectConfig } from "../domain/project.ts";
+import { emptyProjectConfig } from "../domain/project.ts";
+import { CommitPlanError, HookBlockedError, UnsupportedFeatureError } from "../shared/errors.ts";
+import { countLines } from "../shared/text.ts";
+import { executeHooks } from "./hooks.ts";
+import { generateCommitMessage, planCommits, type ProviderConfig } from "./openai-client.ts";
+import { generateProjectScopes } from "./scope-service.ts";
+import type { VcsClient, VcsDiff } from "./vcs.ts";
 
 const maxHookRetries = 3;
 const maxReplans = 2;
 const maxCommitGroups = 5;
+
 const hookRetrySchedule = Schedule.either(
   Schedule.exponential("200 millis"),
   Schedule.spaced("1 second"),
 ).pipe(
-  Schedule.jittered,
   Schedule.take(maxHookRetries - 1),
   Schedule.delays,
-  Schedule.tapOutput((delay) =>
-    Effect.gen(function* () {
+  Schedule.tapOutput(
+    Effect.fn(function* (delay) {
       const retryAt = DateTime.addDuration(yield* DateTime.now, delay);
       yield* Effect.annotateCurrentSpan({
         retry_delay: Duration.format(delay).replace(/\s+\d+ns$/, ""),
@@ -35,18 +41,13 @@ export interface CommitRequest {
   readonly cwd: string;
   readonly provider: ProviderConfig;
   readonly vcs: VcsClient;
-  readonly projectConfig: ProjectConfig | undefined;
+  readonly projectConfig: ProjectConfig;
   readonly intent: string | undefined;
   readonly trailers: ReadonlyArray<Trailer>;
   readonly dryRun: boolean;
   readonly noStage: boolean;
   readonly amend: boolean;
   readonly maxDiffLines: number;
-}
-
-export interface CommitResponse {
-  readonly commits: ReadonlyArray<SingleCommitResult>;
-  readonly dryRun: boolean;
 }
 
 const filterContentPatterns = [
@@ -160,11 +161,10 @@ export const validateCommitPlan = (
   if (duplicates.length === 0) {
     return Effect.succeed(groups);
   }
-  return Effect.failSync(
-    () =>
-      new CommitPlanError({
-        message: `planner returned overlapping files for ${vcs.kind}: ${formatFileList(duplicates)}`,
-      }),
+  return Effect.fail(
+    new CommitPlanError({
+      message: `planner returned overlapping files for ${vcs.kind}: ${formatFileList(duplicates)}`,
+    }),
   );
 };
 
@@ -199,11 +199,8 @@ const withAutoScopes = Effect.fn(function* (
   provider: ProviderConfig,
   vcs: VcsClient,
   cwd: string,
-  projectConfig?: ProjectConfig,
+  projectConfig?: ProjectConfig | undefined | undefined,
 ) {
-  yield* Effect.annotateCurrentSpan({
-    vcs: vcs.kind,
-  });
   if (projectConfig != null && projectConfig.scopes.length > 0) {
     return projectConfig;
   }
@@ -215,17 +212,23 @@ const withAutoScopes = Effect.fn(function* (
   return nextConfig;
 });
 
-const planGroups = Effect.fn(function* (
+const planGroups = Effect.fn("Commit.PlanGroups")(function* (
   provider: ProviderConfig,
   stagedFiles: ReadonlyArray<string>,
   unstagedFiles: ReadonlyArray<string>,
   intent: string | undefined,
   config: ProjectConfig,
 ) {
+  yield* Effect.annotateCurrentSpan({
+    staged_files: stagedFiles.length,
+    unstaged_files: unstagedFiles.length,
+  });
+
   const allFiles = [...new Set([...stagedFiles, ...unstagedFiles])];
   if (allFiles.length === 1) {
     return [{ files: allFiles, message: undefined }] satisfies Array<CommitGroup>;
   }
+
   const plan = yield* planCommits({
     provider,
     stagedFiles,
@@ -233,8 +236,10 @@ const planGroups = Effect.fn(function* (
     intent,
     config,
   });
+
   const allowed = new Set(allFiles);
   const filtered = filterPlanFiles(plan.groups, allowed);
+
   return normalizePlannedGroups(filtered, allowed, stagedFiles).slice(0, maxCommitGroups);
 });
 
@@ -263,7 +268,7 @@ interface RejectedCommitMessageResult {
 const isRetryableHookRejection = (error: unknown): error is RetryableHookRejectionError =>
   RetryableHookRejectionError.is(error);
 
-const generateCommitMessageWithHooks = Effect.fn(function* (
+const generateCommitMessageWithHooks = Effect.fn("Commit.ResolveMessage")(function* (
   request: CommitRequest,
   config: ProjectConfig,
   options: {
@@ -274,207 +279,161 @@ const generateCommitMessageWithHooks = Effect.fn(function* (
     readonly groupTotal: number;
   },
 ) {
-  let hookFeedback = options.initialHookFeedback;
-  let previousMessage: string | undefined;
-  let attempt = 0;
+  const retryState = yield* Ref.make({
+    hookFeedback: options.initialHookFeedback,
+    previousMessage: undefined as string | undefined,
+  });
 
-  return yield* Effect.withSpan(
-    Effect.gen(function* () {
-      attempt += 1;
+  yield* Effect.annotateCurrentSpan({
+    group_index: options.groupIndex,
+    group_total: options.groupTotal,
+    file_count: options.groupDiff.files.length,
+    hook_count: config.hooks.length,
+  });
 
-      const message = yield* Effect.withSpan(
-        generateCommitMessage({
-          provider: request.provider,
-          diff: options.promptDiff,
-          intent: request.intent,
-          config,
-          hookFeedback: hookFeedback.length > 0 ? hookFeedback : undefined,
-          previousMessage,
-        }),
-        "commit.generate-message",
-        {
-          attributes: {
-            vcs: request.vcs.kind,
-            group_index: options.groupIndex,
-            group_total: options.groupTotal,
-            attempt,
-            file_count: options.groupDiff.files.length,
-          },
-        },
-      );
+  return yield* Effect.gen(function* () {
+    const { hookFeedback, previousMessage } = yield* Ref.get(retryState);
 
-      const assembled = yield* request.vcs.formatTrailers(
-        request.cwd,
-        assembleMessage(message),
-        request.trailers,
-      );
-      const accepted = {
-        _tag: "Accepted",
-        message,
-        finalMessage: assembled,
-      } satisfies AcceptedCommitMessageResult;
+    const message = yield* generateCommitMessage({
+      provider: request.provider,
+      diff: options.promptDiff,
+      intent: request.intent,
+      config,
+      hookFeedback: hookFeedback.length > 0 ? hookFeedback : undefined,
+      previousMessage,
+    });
 
-      if (config.hooks.length === 0) {
-        return accepted;
-      }
+    const assembled = yield* request.vcs.formatTrailers(
+      request.cwd,
+      assembleMessage(message),
+      request.trailers,
+    );
 
-      const hookResult = yield* Effect.withSpan(
-        executeHooks(config.hooks, {
-          diff: options.groupDiff.content,
-          commitMessage: assembled,
-          intent: request.intent,
-          stagedFiles: options.groupDiff.files,
-          config,
-        }),
-        "commit.run-hooks",
-        {
-          attributes: {
-            vcs: request.vcs.kind,
-            group_index: options.groupIndex,
-            group_total: options.groupTotal,
-            hook_count: config.hooks.length,
-          },
-        },
-      );
+    const accepted = {
+      _tag: "Accepted",
+      message,
+      finalMessage: assembled,
+    } satisfies AcceptedCommitMessageResult;
 
-      if (hookResult.exitCode === 0) {
-        return accepted;
-      }
+    if (config.hooks.length === 0) {
+      return accepted;
+    }
 
-      hookFeedback = hookResult.stderr;
-      previousMessage = assembled;
+    const hookResult = yield* executeHooks(config.hooks, {
+      diff: options.groupDiff.content,
+      commitMessage: assembled,
+      intent: request.intent,
+      stagedFiles: options.groupDiff.files,
+      config,
+    });
 
-      return yield* new RetryableHookRejectionError({
-        reason: hookResult.stderr,
-        lastMessage: assembled,
-      });
-    }).pipe(
-      Effect.retry({
-        while: isRetryableHookRejection,
-        schedule: hookRetrySchedule,
-      }),
-      Effect.catchTag("RetryableHookRejectionError", (error) =>
-        Effect.succeed({
-          _tag: "Rejected",
-          reason: error.reason,
-          lastMessage: error.lastMessage,
-        } satisfies RejectedCommitMessageResult),
-      ),
+    if (hookResult.exitCode === 0) {
+      return accepted;
+    }
+
+    yield* Ref.set(retryState, {
+      hookFeedback: hookResult.stderr,
+      previousMessage: assembled,
+    });
+
+    return yield* new RetryableHookRejectionError({
+      reason: hookResult.stderr,
+      lastMessage: assembled,
+    });
+  }).pipe(
+    Effect.retry({
+      while: isRetryableHookRejection,
+      schedule: hookRetrySchedule,
+    }),
+    Effect.catchTag("RetryableHookRejectionError", (error) =>
+      Effect.succeed({
+        _tag: "Rejected",
+        reason: error.reason,
+        lastMessage: error.lastMessage,
+      } satisfies RejectedCommitMessageResult),
     ),
-    "commit.resolve-message",
-    {
-      attributes: {
-        vcs: request.vcs.kind,
-        group_index: options.groupIndex,
-        group_total: options.groupTotal,
-        file_count: options.groupDiff.files.length,
-        hook_count: config.hooks.length,
-      },
-    },
   );
 });
 
-const commitGit = Effect.fn(function* (request: CommitRequest, config: ProjectConfig) {
-  const { promptStaged, promptUnstaged } = yield* Effect.withSpan(
-    Effect.gen(function* () {
-      const preStaged = request.noStage
-        ? yield* request.vcs.stagedDiff(request.cwd)
-        : yield* request.vcs.stagedDiff(request.cwd);
-      let staged = preStaged;
-      let unstaged = request.noStage
-        ? ({ files: [], content: "", lines: 0 } satisfies VcsDiff)
-        : yield* request.vcs.unstagedDiff(request.cwd);
+const commitGit = Effect.fn("Commit.Run")(function* (
+  request: CommitRequest,
+  config: ProjectConfig,
+) {
+  const { promptStaged, promptUnstaged } = yield* Effect.gen(function* () {
+    const preStaged = request.noStage
+      ? yield* request.vcs.stagedDiff(request.cwd)
+      : yield* request.vcs.stagedDiff(request.cwd);
 
-      if (!request.noStage) {
-        yield* request.vcs.addAll(request.cwd);
-        const full = yield* request.vcs.stagedDiff(request.cwd);
-        if (full.files.length === 0) {
-          return yield* new UnsupportedFeatureError({ message: "no changes" });
-        }
+    let staged = preStaged;
+    let unstaged = request.noStage
+      ? ({ files: [], content: "", lines: 0 } satisfies VcsDiff)
+      : yield* request.vcs.unstagedDiff(request.cwd);
 
-        if (preStaged.files.length === 0) {
-          staged = { files: [], content: "", lines: 0 };
-          unstaged = full;
-        } else {
-          const userStaged = new Set(preStaged.files);
-          const newFiles = full.files.filter((file) => !userStaged.has(file));
-          staged = preStaged;
-          unstaged =
-            newFiles.length === 0
-              ? { files: [], content: "", lines: 0 }
-              : yield* request.vcs.diffForFiles(request.cwd, newFiles);
-        }
-      } else if (staged.files.length === 0) {
-        return yield* new UnsupportedFeatureError({
-          message: "no staged changes (hint: stage files with git add, or remove --no-stage)",
-        });
+    if (!request.noStage) {
+      yield* request.vcs.addAll(request.cwd);
+      const full = yield* request.vcs.stagedDiff(request.cwd);
+
+      if (full.files.length === 0) {
+        return yield* new UnsupportedFeatureError({ message: "no changes" });
       }
 
-      const promptStaged =
-        request.maxDiffLines > 0
-          ? truncateDiff(filterDiffForPrompt(staged), request.maxDiffLines)
-          : filterDiffForPrompt(staged);
-      const promptUnstaged =
-        request.maxDiffLines > 0
-          ? truncateDiff(filterDiffForPrompt(unstaged), request.maxDiffLines)
-          : filterDiffForPrompt(unstaged);
+      if (preStaged.files.length === 0) {
+        staged = { files: [], content: "", lines: 0 };
+        unstaged = full;
+      } else {
+        const userStaged = new Set(preStaged.files);
+        const newFiles = full.files.filter((file) => !userStaged.has(file));
+        staged = preStaged;
+        unstaged =
+          newFiles.length === 0
+            ? { files: [], content: "", lines: 0 }
+            : yield* request.vcs.diffForFiles(request.cwd, newFiles);
+      }
+    } else if (staged.files.length === 0) {
+      return yield* new UnsupportedFeatureError({
+        message: "no staged changes (hint: stage files with git add, or remove --no-stage)",
+      });
+    }
 
-      return { promptStaged, promptUnstaged };
-    }),
-    "commit.scan-changes",
-    {
-      attributes: {
-        vcs: "git",
-        no_stage: request.noStage,
-        dry_run: request.dryRun,
-      },
-    },
-  );
+    const promptStaged =
+      request.maxDiffLines > 0
+        ? truncateDiff(filterDiffForPrompt(staged), request.maxDiffLines)
+        : filterDiffForPrompt(staged);
+
+    const promptUnstaged =
+      request.maxDiffLines > 0
+        ? truncateDiff(filterDiffForPrompt(unstaged), request.maxDiffLines)
+        : filterDiffForPrompt(unstaged);
+
+    return { promptStaged, promptUnstaged };
+  }).pipe(Effect.withSpan("Commit.ScanChanges"));
 
   const configWithScopes =
     config.scopes.length > 0
       ? config
       : yield* withAutoScopes(request.provider, request.vcs, request.cwd, config);
-  let groups = yield* Effect.withSpan(
-    planGroups(
-      request.provider,
-      promptStaged.files,
-      promptUnstaged.files,
-      request.intent,
-      configWithScopes,
-    ).pipe(Effect.flatMap((planned) => validateCommitPlan(request.vcs, planned))),
-    "commit.plan-groups",
-    {
-      attributes: {
-        vcs: "git",
-        staged_files: promptStaged.files.length,
-        unstaged_files: promptUnstaged.files.length,
-      },
-    },
-  );
+
+  let groups = yield* planGroups(
+    request.provider,
+    promptStaged.files,
+    promptUnstaged.files,
+    request.intent,
+    configWithScopes,
+  ).pipe(Effect.flatMap((planned) => validateCommitPlan(request.vcs, planned)));
 
   if (configWithScopes.scopes.length > 0 && hasUnscopedGroups(groups)) {
+    // TODO: rename span name
     const refreshedScopes = yield* Effect.withSpan(
       generateProjectScopes(request.provider, request.vcs, request.cwd, 200),
-      "commit.refresh-scopes",
-      {
-        attributes: {
-          vcs: "git",
-        },
-      },
+      "Commit.RefreshScopes",
     );
     groups = yield* Effect.withSpan(
       planGroups(request.provider, promptStaged.files, promptUnstaged.files, request.intent, {
         ...configWithScopes,
         scopes: refreshedScopes,
       }).pipe(Effect.flatMap((planned) => validateCommitPlan(request.vcs, planned))),
-      "commit.replan-groups",
-      {
-        attributes: {
-          vcs: "git",
-          reason: "unscoped-groups",
-        },
-      },
+      "Commit.ReplanGroups",
+      { attributes: { reason: "unscoped-groups" } },
     );
   }
 
@@ -502,6 +461,7 @@ const commitGit = Effect.fn(function* (request: CommitRequest, config: ProjectCo
       request.maxDiffLines > 0
         ? truncateDiff(filterDiffForPrompt(groupDiff), request.maxDiffLines)
         : filterDiffForPrompt(groupDiff);
+
     const messageResult = yield* generateCommitMessageWithHooks(request, configWithScopes, {
       promptDiff,
       groupDiff,
@@ -513,7 +473,7 @@ const commitGit = Effect.fn(function* (request: CommitRequest, config: ProjectCo
     if (messageResult._tag === "Rejected") {
       if (replanCount >= maxReplans) {
         return yield* new HookBlockedError({
-          message: "error: commit blocked after retries",
+          message: "commit blocked after retries",
           reason: messageResult.reason,
           lastMessage: messageResult.lastMessage,
         });
@@ -528,14 +488,8 @@ const commitGit = Effect.fn(function* (request: CommitRequest, config: ProjectCo
           planGroups(request.provider, regroupedFiles, [], request.intent, configWithScopes).pipe(
             Effect.flatMap((planned) => validateCommitPlan(request.vcs, planned)),
           ),
-          "commit.replan-groups",
-          {
-            attributes: {
-              vcs: "git",
-              reason: "hook-failures",
-              file_count: regroupedFiles.length,
-            },
-          },
+          "Commit.ReplanGroups",
+          { attributes: { reason: "hook-failures", file_count: regroupedFiles.length } },
         )),
       ];
       continue;
@@ -552,10 +506,9 @@ const commitGit = Effect.fn(function* (request: CommitRequest, config: ProjectCo
     if (!request.dryRun) {
       const output = yield* Effect.withSpan(
         request.vcs.commit(request.cwd, messageResult.finalMessage),
-        "commit.create",
+        "Commit.Create",
         {
           attributes: {
-            vcs: "git",
             group_index: results.length + 1,
             group_total: results.length + remaining.length + 1,
             file_count: group.files.length,
@@ -572,51 +525,36 @@ const commitGit = Effect.fn(function* (request: CommitRequest, config: ProjectCo
     }
   }
 
-  return {
-    commits: results,
-    dryRun: request.dryRun,
-  } satisfies CommitResponse;
+  return results satisfies CommitResponse;
 });
 
-const commitJj = Effect.fn(function* (request: CommitRequest, config: ProjectConfig) {
+const commitJj = Effect.fn("Commit.Run")(function* (request: CommitRequest, config: ProjectConfig) {
   if (request.noStage) {
     return yield* new UnsupportedFeatureError({ message: "--no-stage is not supported for jj" });
   }
 
-  const promptDiff = yield* Effect.withSpan(
-    Effect.gen(function* () {
-      const fullDiff = yield* request.vcs.unstagedDiff(request.cwd);
-      if (fullDiff.files.length === 0) {
-        return yield* new UnsupportedFeatureError({ message: "no changes" });
-      }
-      return request.maxDiffLines > 0
-        ? truncateDiff(filterDiffForPrompt(fullDiff), request.maxDiffLines)
-        : filterDiffForPrompt(fullDiff);
-    }),
-    "commit.scan-changes",
-    {
-      attributes: {
-        vcs: "jj",
-        dry_run: request.dryRun,
-      },
-    },
-  );
+  const promptDiff = yield* Effect.gen(function* () {
+    const fullDiff = yield* request.vcs.unstagedDiff(request.cwd);
+    if (fullDiff.files.length === 0) {
+      return yield* new UnsupportedFeatureError({ message: "no changes" });
+    }
+    return request.maxDiffLines > 0
+      ? truncateDiff(filterDiffForPrompt(fullDiff), request.maxDiffLines)
+      : filterDiffForPrompt(fullDiff);
+  }).pipe(Effect.withSpan("Commit.ScanChanges"));
+
   const configWithScopes =
     config.scopes.length > 0
       ? config
       : yield* withAutoScopes(request.provider, request.vcs, request.cwd, config);
-  let groups = yield* Effect.withSpan(
-    planGroups(request.provider, [], promptDiff.files, request.intent, configWithScopes).pipe(
-      Effect.flatMap((planned) => validateCommitPlan(request.vcs, planned)),
-    ),
-    "commit.plan-groups",
-    {
-      attributes: {
-        vcs: "jj",
-        unstaged_files: promptDiff.files.length,
-      },
-    },
-  );
+
+  let groups = yield* planGroups(
+    request.provider,
+    [],
+    promptDiff.files,
+    request.intent,
+    configWithScopes,
+  ).pipe(Effect.flatMap((planned) => validateCommitPlan(request.vcs, planned)));
 
   const results: Array<SingleCommitResult> = [];
   let replanCount = 0;
@@ -637,11 +575,11 @@ const commitJj = Effect.fn(function* (request: CommitRequest, config: ProjectCon
     }
 
     const step = commitStepLabel(results.length, results.length + remaining.length + 1);
-
     const truncated =
       request.maxDiffLines > 0
         ? truncateDiff(filterDiffForPrompt(groupDiff), request.maxDiffLines)
         : filterDiffForPrompt(groupDiff);
+
     const messageResult = yield* generateCommitMessageWithHooks(request, configWithScopes, {
       promptDiff: truncated,
       groupDiff,
@@ -653,7 +591,7 @@ const commitJj = Effect.fn(function* (request: CommitRequest, config: ProjectCon
     if (messageResult._tag === "Rejected") {
       if (replanCount >= maxReplans) {
         return yield* new HookBlockedError({
-          message: "error: commit blocked after retries",
+          message: "commit blocked after retries",
           reason: messageResult.reason,
           lastMessage: messageResult.lastMessage,
         });
@@ -664,18 +602,13 @@ const commitJj = Effect.fn(function* (request: CommitRequest, config: ProjectCon
         ...new Set([...(group.files ?? []), ...remaining.flatMap((item) => item.files)]),
       ];
       remaining = [
+        // TODO: Rename span name
         ...(yield* Effect.withSpan(
           planGroups(request.provider, [], regroupedFiles, request.intent, configWithScopes).pipe(
             Effect.flatMap((planned) => validateCommitPlan(request.vcs, planned)),
           ),
-          "commit.replan-groups",
-          {
-            attributes: {
-              vcs: "jj",
-              reason: "hook-failures",
-              file_count: regroupedFiles.length,
-            },
-          },
+          "Commit.ReplanGroups",
+          { attributes: { reason: "hook-failures", file_count: regroupedFiles.length } },
         )),
       ];
       continue;
@@ -692,10 +625,9 @@ const commitJj = Effect.fn(function* (request: CommitRequest, config: ProjectCon
     if (!request.dryRun) {
       const output = yield* Effect.withSpan(
         request.vcs.commit(request.cwd, messageResult.finalMessage, group.files),
-        "commit.create",
+        "Commit.create",
         {
           attributes: {
-            vcs: "jj",
             group_index: results.length + 1,
             group_total: results.length + remaining.length + 1,
             file_count: group.files.length,
@@ -713,10 +645,7 @@ const commitJj = Effect.fn(function* (request: CommitRequest, config: ProjectCon
     }
   }
 
-  return {
-    commits: results,
-    dryRun: request.dryRun,
-  } satisfies CommitResponse;
+  return results satisfies CommitResponse;
 });
 
 export const runCommitService = Effect.fn(function* (request: CommitRequest) {
@@ -726,46 +655,43 @@ export const runCommitService = Effect.fn(function* (request: CommitRequest) {
     no_stage: request.noStage,
     vcs: request.vcs.kind,
   });
-  const config = request.projectConfig ?? emptyProjectConfig();
+
+  const config = request.projectConfig;
+
   if (request.amend) {
     const diff = yield* Effect.withSpan(
       request.vcs.lastCommitDiff(request.cwd),
-      "commit.load-previous",
-      {
-        attributes: {
-          vcs: request.vcs.kind,
-        },
-      },
+      "Commit.LoadPrevious",
     );
+
+    yield* Effect.annotateCurrentSpan({
+      attributes: { file_count: diff.files.length },
+    });
+
     if (diff.files.length === 0) {
       return yield* new UnsupportedFeatureError({ message: "no previous commit to amend" });
     }
+
     const truncated =
       request.maxDiffLines > 0
         ? truncateDiff(filterDiffForPrompt(diff), request.maxDiffLines)
         : filterDiffForPrompt(diff);
-    const message = yield* Effect.withSpan(
-      generateCommitMessage({
-        provider: request.provider,
-        diff: truncated,
-        intent: request.intent,
-        config,
-        hookFeedback: undefined,
-        previousMessage: undefined,
-      }),
-      "commit.generate-amend-message",
-      {
-        attributes: {
-          vcs: request.vcs.kind,
-          file_count: diff.files.length,
-        },
-      },
-    );
+
+    const message = yield* generateCommitMessage({
+      provider: request.provider,
+      diff: truncated,
+      intent: request.intent,
+      config,
+      hookFeedback: undefined,
+      previousMessage: undefined,
+    });
+
     const assembled = yield* request.vcs.formatTrailers(
       request.cwd,
       assembleMessage(message),
       request.trailers,
     );
+
     const result: SingleCommitResult = {
       title: message.title,
       bullets: message.bullets,
@@ -773,31 +699,17 @@ export const runCommitService = Effect.fn(function* (request: CommitRequest) {
       files: diff.files,
       output: undefined,
     };
+
     if (!request.dryRun) {
       const output = yield* Effect.withSpan(
         request.vcs.amendCommit(request.cwd, assembled),
-        "commit.amend",
-        {
-          attributes: {
-            vcs: request.vcs.kind,
-            file_count: diff.files.length,
-          },
-        },
+        "Commit.Amend",
       );
-      return {
-        commits: [
-          {
-            ...result,
-            output,
-          },
-        ],
-        dryRun: false,
-      } satisfies CommitResponse;
+
+      return [{ ...result, output }] satisfies CommitResponse;
     }
-    return {
-      commits: [result],
-      dryRun: request.dryRun,
-    } satisfies CommitResponse;
+
+    return [result] satisfies CommitResponse;
   }
 
   return yield* request.vcs.kind === "git" ? commitGit(request, config) : commitJj(request, config);

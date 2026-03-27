@@ -1,41 +1,49 @@
 import { Effect, FileSystem, Formatter, Path, Schema } from "effect";
-import type { ProjectConfig } from "../domain/project";
-import { ConfigError, renderError } from "../shared/errors";
-import { runProcess } from "../shared/process";
+import { ProjectConfig } from "../domain/project.ts";
+import { ConfigError } from "../shared/errors.ts";
+import { runProcess } from "../shared/process.ts";
 import {
   hasErrors,
   validateConventional,
   validationErrors,
   validationWarnings,
-} from "./conventional";
+} from "./conventional.ts";
 
-export interface HookInput {
-  readonly diff: string;
-  readonly commitMessage: string;
-  readonly intent: string | undefined;
-  readonly stagedFiles: ReadonlyArray<string>;
-  readonly config: ProjectConfig;
-}
+export const HookInput = Schema.Struct({
+  diff: Schema.String,
+  commitMessage: Schema.String,
+  intent: Schema.String.pipe(Schema.UndefinedOr),
+  stagedFiles: Schema.Array(Schema.String),
+  config: ProjectConfig,
+});
 
-export interface HookResult {
-  readonly exitCode: number;
-  readonly stderr: string;
-}
+export type HookInput = typeof HookInput.Type;
 
-export interface InstalledHookValue {
-  readonly value: string;
-  readonly installedFrom: string | undefined;
-}
+export const HookResult = Schema.Struct({
+  exitCode: Schema.Number,
+  stderr: Schema.String,
+});
 
-const encodeHookInputToJson = Schema.encodeUnknownSync(Schema.Json);
+export type HookResult = typeof HookResult.Type;
+
+export const InstalledHookValue = Schema.Struct({
+  value: Schema.String,
+  installedFrom: Schema.String.pipe(Schema.UndefinedOr),
+});
+
+export type InstalledHookValue = typeof InstalledHookValue.Type;
+
+const encodeHookInputToJson = Schema.encodeUnknownSync(HookInput);
 
 const executeShellHook = Effect.fn(function* (path: string, input: HookInput) {
   const fs = yield* FileSystem.FileSystem;
+
   const info = yield* fs.stat(path).pipe(
     Effect.mapError(
       (cause) =>
         new ConfigError({
-          message: `failed to read hook "${path}": ${cause.message}`,
+          message: `failed to read hook "${path}"`,
+          cause,
         }),
     ),
   );
@@ -59,13 +67,12 @@ const executeShellHook = Effect.fn(function* (path: string, input: HookInput) {
           stderr: result.stderr,
         }) satisfies HookResult,
     ),
-    Effect.catch((cause) =>
-      Effect.failSync(
-        () =>
-          new ConfigError({
-            message: `failed to run hook "${path}": ${renderError(cause)}`,
-          }),
-      ),
+    Effect.mapError(
+      (cause) =>
+        new ConfigError({
+          message: `failed to run hook "${path}"`,
+          cause,
+        }),
     ),
   );
 });
@@ -83,7 +90,12 @@ const executeConventionalHook = (input: HookInput): HookResult => {
   };
 };
 
-export const executeHooks = Effect.fn(function* (hooks: ReadonlyArray<string>, input: HookInput) {
+export const executeHooks = Effect.fn("Commit.run-hooks")(function* (
+  hooks: ReadonlyArray<string>,
+  input: HookInput,
+) {
+  yield* Effect.annotateCurrentSpan({ hook_count: hooks.length });
+
   let warnings = "";
   for (const hook of hooks) {
     if (hook === "" || hook === "empty") {
@@ -92,15 +104,10 @@ export const executeHooks = Effect.fn(function* (hooks: ReadonlyArray<string>, i
 
     const result = yield* Effect.withSpan(
       hook === "conventional"
-        ? Effect.succeed(executeConventionalHook(input))
+        ? Effect.sync(() => executeConventionalHook(input))
         : executeShellHook(hook, input),
-      "hooks.execute",
-      {
-        attributes: {
-          hook,
-          hook_type: hook === "conventional" ? "conventional" : "shell",
-        },
-      },
+      "Hooks.Execute",
+      { attributes: { hook, hook_type: hook === "conventional" ? "conventional" : "shell" } },
     );
 
     if (result.exitCode !== 0) {
@@ -139,7 +146,8 @@ export const installHookValue = Effect.fn(function* (repoRoot: string, key: stri
     Effect.mapError(
       (cause) =>
         new ConfigError({
-          message: `reading hook file "${value}": ${cause.message}`,
+          message: `reading hook file "${value}"`,
+          cause,
         }),
     ),
   );
@@ -149,7 +157,8 @@ export const installHookValue = Effect.fn(function* (repoRoot: string, key: stri
     Effect.mapError(
       (cause) =>
         new ConfigError({
-          message: `creating hooks dir: ${cause.message}`,
+          message: "creating hooks dir",
+          cause,
         }),
     ),
   );
@@ -157,7 +166,8 @@ export const installHookValue = Effect.fn(function* (repoRoot: string, key: stri
     Effect.mapError(
       (cause) =>
         new ConfigError({
-          message: `installing hook: ${cause.message}`,
+          message: "installing hook",
+          cause,
         }),
     ),
   );

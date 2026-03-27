@@ -1,28 +1,35 @@
 import * as OpenAi from "@effect/ai-openai";
-import { DateTime, Duration, Effect, Layer, Redacted, Schedule } from "effect";
-import { LanguageModel } from "effect/unstable/ai";
+import {
+  DateTime,
+  Duration,
+  Effect,
+  identity,
+  Layer,
+  pipe,
+  Redacted,
+  Schedule,
+  Schema,
+  SchemaTransformation,
+} from "effect";
+import { AiError, LanguageModel } from "effect/unstable/ai";
 import { HttpClient } from "effect/unstable/http";
-import type { CommitMessage, CommitPlan } from "../domain/commit";
-import type { ProjectConfig, ProjectScope } from "../domain/project";
-import { ApiError } from "../shared/errors";
-import { extractJson, wrapExplanation } from "../shared/text";
-import type { VcsDiff } from "./vcs";
-
-export interface ProviderConfig {
-  readonly apiKey: string;
-  readonly baseUrl: string;
-  readonly model: string;
-}
+import type { ProviderConfig } from "../config/provider.ts";
+export type { ProviderConfig } from "../config/provider.ts";
+import type { CommitMessage, CommitPlan } from "../domain/commit.ts";
+import type { ProjectConfig } from "../domain/project.ts";
+import { ProjectScope } from "../domain/project.ts";
+import { ApiError } from "../shared/errors.ts";
+import { extractJson, wrapExplanation } from "../shared/text.ts";
+import type { VcsDiff } from "./vcs.ts";
 
 const llmInvalidOutputRetrySchedule = Schedule.either(
   Schedule.exponential("300 millis"),
   Schedule.spaced("1 second"),
 ).pipe(
-  Schedule.jittered,
   Schedule.take(2),
   Schedule.delays,
-  Schedule.tapOutput((delay) =>
-    Effect.gen(function* () {
+  Schedule.tapOutput(
+    Effect.fn(function* (delay) {
       const retryAt = DateTime.addDuration(yield* DateTime.now, delay);
       yield* Effect.annotateCurrentSpan({
         retry_delay: Duration.format(delay).replace(/\s+\d+ns$/, ""),
@@ -39,8 +46,8 @@ const llmTransientRetrySchedule = Schedule.either(
   Schedule.jittered,
   Schedule.take(2),
   Schedule.delays,
-  Schedule.tapOutput((delay) =>
-    Effect.gen(function* () {
+  Schedule.tapOutput(
+    Effect.fn(function* (delay) {
       const retryAt = DateTime.addDuration(yield* DateTime.now, delay);
       yield* Effect.annotateCurrentSpan({
         retry_delay: Duration.format(delay).replace(/\s+\d+ns$/, ""),
@@ -77,9 +84,8 @@ const makeLanguageModelLayer = (config: ProviderConfig, maxOutputTokens: number)
     config: isReasoningModel(config.model)
       ? {
           max_output_tokens: maxOutputTokens,
-          reasoning: {
-            effort: "low",
-          },
+          reasoning: { effort: "low" },
+          temperature: 0,
         }
       : {
           max_output_tokens: maxOutputTokens,
@@ -91,44 +97,33 @@ const makeLanguageModelLayer = (config: ProviderConfig, maxOutputTokens: number)
         apiKey: Redacted.make(config.apiKey),
         apiUrl: config.baseUrl,
         transformClient: (client) =>
-          HttpClient.retryTransient(client, {
-            schedule: llmTransientRetrySchedule,
-          }),
+          HttpClient.retryTransient(client, { schedule: llmTransientRetrySchedule }),
       }),
     ),
   );
 
-const callLlm = (config: ProviderConfig, system: string, user: string, maxOutputTokens: number) =>
-  LanguageModel.generateText({
-    prompt: [
-      { role: "system", content: system },
-      { role: "user", content: user },
-    ],
-    toolChoice: "none",
-  }).pipe(
+// TODO: refactor to layer
+
+const callLlm = Effect.fn("LLM.call")(function* (
+  config: ProviderConfig,
+  system: string,
+  user: string,
+  maxOutputTokens: number,
+) {
+  const text = yield* pipe(
+    LanguageModel.generateText({
+      prompt: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      toolChoice: "none",
+    }),
     Effect.map((response) => response.text.trim()),
-    Effect.flatMap((text) =>
-      text.length > 0
-        ? Effect.succeed(text)
-        : Effect.failSync(
-            () =>
-              new ApiError({
-                message: `LLM returned empty response (model=${config.model})`,
-              }),
-          ),
-    ),
     Effect.provide(makeLanguageModelLayer(config, maxOutputTokens)),
-    Effect.catch((cause) =>
-      ApiError.is(cause)
-        ? Effect.failSync(() => cause)
-        : Effect.failSync(
-            () =>
-              new ApiError({
-                message: cause instanceof Error ? cause.message : String(cause),
-              }),
-          ),
-    ),
   );
+
+  return text;
+});
 
 const formatScopes = (config: ProjectConfig): string =>
   config.scopes
@@ -158,30 +153,183 @@ const detectTechSystemPrompt =
 const generateScopesSystemPrompt =
   'You are an expert software engineer. Derive commit scopes from the top-level directories of the project, using commit history to validate and refine them. Respond ONLY with valid JSON: {"scopes": [{"name": "...", "description": "..."}], "reasoning": "..."}. Scope names must be short, lowercase, and must not be commit types.';
 
-const isRetryableInvalidModelOutput = (error: ApiError): boolean =>
-  error.message.startsWith("failed to parse model JSON:") ||
-  error.message.startsWith("LLM returned empty ");
+const isRetryableInvalidModelOutput = (error: ApiError | AiError.AiError): boolean =>
+  ApiError.is(error) || (AiError.isAiError(error) && error.reason.isRetryable);
 
-const parseJson = <A>(raw: string, wrapKey?: string): Effect.Effect<A, ApiError> => {
+const TrimmedString = Schema.String.pipe(Schema.decode(SchemaTransformation.trim()));
+const NonEmptyTrimmedString = TrimmedString.check(Schema.isNonEmpty());
+
+const compactStrings = (items: ReadonlyArray<string>): ReadonlyArray<string> =>
+  items.filter((item) => item.length > 0);
+
+const CompactTrimmedStringArray = Schema.Array(TrimmedString).pipe(
+  Schema.decodeTo(
+    Schema.Array(TrimmedString),
+    SchemaTransformation.transform({
+      decode: compactStrings,
+      encode: identity,
+    }),
+  ),
+);
+
+const OptionalTrimmedString = TrimmedString.pipe(Schema.withDecodingDefaultKey(() => ""));
+const OptionalCompactTrimmedStringArray = CompactTrimmedStringArray.pipe(
+  Schema.withDecodingDefaultKey(() => []),
+);
+
+const normalizeModelJson = (raw: string, wrapKey?: string | undefined): string => {
   const cleaned = extractJson(raw);
-  return Effect.try({
-    try: () => {
-      try {
-        return JSON.parse(cleaned) as A;
-      } catch (error) {
-        if (wrapKey != null && cleaned.startsWith("[")) {
-          return JSON.parse(`{"${wrapKey}":${cleaned}}`) as A;
-        }
-        throw error;
-      }
-    },
-    catch: (error) =>
-      new ApiError({
-        message: `failed to parse model JSON: ${error instanceof Error ? error.message : String(error)}`,
-        body: cleaned,
-      }),
-  });
+
+  if (wrapKey != null && cleaned.startsWith("[")) {
+    return `{"${wrapKey}":${cleaned}}`;
+  }
+
+  return cleaned;
 };
+
+const makeLlmJsonResponse = <A>(schema: Schema.Codec<A>, wrapKey?: string | undefined) =>
+  Schema.String.pipe(
+    Schema.decodeTo(
+      Schema.fromJsonString(schema),
+      SchemaTransformation.transform({
+        decode: (raw) => normalizeModelJson(raw, wrapKey),
+        encode: identity,
+      }),
+    ),
+  );
+
+const invalidLlmOutputError = (method: string, description: string): AiError.AiError =>
+  new AiError.AiError({
+    module: "LLM",
+    method,
+    reason: new AiError.InvalidOutputError({ description }),
+  });
+
+const mapInvalidLlmJsonResponse = (method: string, description: string) =>
+  Effect.mapError((_: unknown) => invalidLlmOutputError(method, description));
+
+const CommitMessageResponse = makeLlmJsonResponse(
+  Schema.Struct({
+    title: OptionalTrimmedString,
+    bullets: OptionalCompactTrimmedStringArray,
+    explanation: OptionalTrimmedString,
+  }),
+).pipe(
+  Schema.decodeTo(
+    Schema.Struct({
+      title: NonEmptyTrimmedString,
+      bullets: CompactTrimmedStringArray,
+      explanation: TrimmedString,
+    }),
+    SchemaTransformation.transform({
+      decode: ({ title, bullets, explanation }) => ({
+        title: title ?? "",
+        bullets: bullets ?? [],
+        explanation: wrapExplanation(explanation ?? ""),
+      }),
+      encode: ({ title, bullets, explanation }) => ({
+        title,
+        bullets,
+        explanation,
+      }),
+    }),
+  ),
+);
+const decodeCommitMessageResponse = Schema.decodeEffect(CommitMessageResponse);
+
+const CommitPlanResponse = makeLlmJsonResponse(
+  Schema.Struct({
+    groups: Schema.Array(
+      Schema.Struct({
+        files: OptionalCompactTrimmedStringArray,
+        title: OptionalTrimmedString,
+        bullets: OptionalCompactTrimmedStringArray,
+        explanation: OptionalTrimmedString,
+      }),
+    ),
+  }),
+  "groups",
+).pipe(
+  Schema.decodeTo(
+    Schema.Struct({
+      groups: Schema.Array(
+        Schema.Struct({
+          files: CompactTrimmedStringArray,
+          message: Schema.Struct({
+            title: NonEmptyTrimmedString,
+            bullets: CompactTrimmedStringArray,
+            explanation: TrimmedString,
+          }).pipe(Schema.UndefinedOr),
+        }),
+      ).check(Schema.isNonEmpty()),
+    }),
+    SchemaTransformation.transform({
+      decode: ({ groups }) => ({
+        groups: groups.map((group) => ({
+          files: group.files ?? [],
+          message:
+            (group.title ?? "").length > 0
+              ? {
+                  title: group.title ?? "",
+                  bullets: group.bullets ?? [],
+                  explanation: wrapExplanation(group.explanation ?? ""),
+                }
+              : undefined,
+        })) as ReadonlyArray<{
+          readonly files: ReadonlyArray<string>;
+          readonly message:
+            | {
+                readonly title: string;
+                readonly bullets: ReadonlyArray<string>;
+                readonly explanation: string;
+              }
+            | undefined;
+        }>,
+      }),
+      encode: ({ groups }) => ({
+        groups: groups.map((group) => ({
+          files: group.files,
+          title: group.message?.title ?? "",
+          bullets: group.message?.bullets ?? [],
+          explanation: group.message?.explanation ?? "",
+        })),
+      }),
+    }),
+  ),
+);
+const decodeCommitPlanResponse = Schema.decodeEffect(CommitPlanResponse);
+
+const TechnologiesResponse = makeLlmJsonResponse(
+  Schema.Struct({
+    technologies: CompactTrimmedStringArray,
+  }),
+  "technologies",
+).pipe(
+  Schema.decodeTo(
+    Schema.Array(TrimmedString).check(Schema.isNonEmpty()),
+    SchemaTransformation.transform({
+      decode: ({ technologies }) => technologies,
+      encode: (technologies) => ({ technologies }),
+    }),
+  ),
+);
+const decodeTechnologiesResponse = Schema.decodeEffect(TechnologiesResponse);
+
+const ProjectScopesResponse = makeLlmJsonResponse(
+  Schema.Struct({
+    scopes: Schema.Array(ProjectScope),
+  }),
+  "scopes",
+).pipe(
+  Schema.decodeTo(
+    Schema.Array(ProjectScope).check(Schema.isNonEmpty()),
+    SchemaTransformation.transform({
+      decode: ({ scopes }) => scopes,
+      encode: (scopes) => ({ scopes }),
+    }),
+  ),
+);
+const decodeProjectScopesResponse = Schema.decodeEffect(ProjectScopesResponse);
 
 export interface GenerateCommitMessageInput {
   readonly provider: ProviderConfig;
@@ -192,81 +340,66 @@ export interface GenerateCommitMessageInput {
   readonly previousMessage: string | undefined;
 }
 
-export const generateCommitMessage = Effect.fn(function* ({
-  provider,
-  diff,
-  intent,
-  config,
-  hookFeedback,
-  previousMessage,
-}: GenerateCommitMessageInput) {
-  const hasScopes = config.scopes.length > 0;
-  const systemPrompt =
-    previousMessage != null && hookFeedback != null
-      ? retrySystemPrompt
-      : hasScopes
-        ? generateSystemPromptScoped
-        : generateSystemPrompt;
+export const generateCommitMessage = Effect.fn("LLM.GenerateMessage")(
+  function* ({
+    provider,
+    diff,
+    intent,
+    config,
+    hookFeedback,
+    previousMessage,
+  }: GenerateCommitMessageInput) {
+    const hasScopes = config.scopes.length > 0;
+    const systemPrompt =
+      previousMessage != null && hookFeedback != null
+        ? retrySystemPrompt
+        : hasScopes
+          ? generateSystemPromptScoped
+          : generateSystemPrompt;
 
-  const promptParts: Array<string> = [];
-  if (previousMessage != null && hookFeedback != null) {
-    promptParts.push(`Fix the following commit message:\n\n${previousMessage}`);
-    promptParts.push(`The commit hook rejected it for this reason:\n${hookFeedback}`);
-    promptParts.push(
-      "Rewrite the message to satisfy the requirement. Keep the semantic content unchanged.",
-    );
-  } else {
-    if (typeof intent === "string" && intent.trim().length > 0) {
-      promptParts.push(`PRIMARY DIRECTIVE - focus only on this: ${intent.trim()}`);
-    }
-    if (hasScopes) {
+    const promptParts: Array<string> = [];
+
+    const scheduleMetadata = yield* Schedule.CurrentMetadata;
+
+    yield* Effect.annotateCurrentSpan({ attempt: scheduleMetadata.attempt });
+
+    if (previousMessage != null && hookFeedback != null) {
+      promptParts.push(`Fix the following commit message:\n\n${previousMessage}`);
+      promptParts.push(`The commit hook rejected it for this reason:\n${hookFeedback}`);
       promptParts.push(
-        `REQUIRED scopes (use the most appropriate one):\n- ${formatScopes(config)}`,
+        "Rewrite the message to satisfy the requirement. Keep the semantic content unchanged.",
       );
-    }
-    promptParts.push(
-      `Git diff:\n<diff>\n${diff.content}\n</diff>\n\nStaged files: ${diff.files.join(", ")}`,
-    );
-    if (typeof hookFeedback === "string" && hookFeedback.trim().length > 0) {
+    } else {
+      if (typeof intent === "string" && intent.trim().length > 0) {
+        promptParts.push(`PRIMARY DIRECTIVE - focus only on this: ${intent.trim()}`);
+      }
+      if (hasScopes) {
+        promptParts.push(
+          `REQUIRED scopes (use the most appropriate one):\n- ${formatScopes(config)}`,
+        );
+      }
       promptParts.push(
-        `Previous attempt was rejected by the commit hook. Reason:\n${hookFeedback.trim()}`,
+        `Git diff:\n<diff>\n${diff.content}\n</diff>\n\nStaged files: ${diff.files.join(", ")}`,
       );
-    }
-  }
-
-  return yield* Effect.gen(function* () {
-    const raw = yield* callLlm(provider, systemPrompt, promptParts.join("\n\n"), 4096);
-    const parsed = yield* parseJson<{
-      title?: string;
-      bullets?: Array<string>;
-      explanation?: string;
-    }>(raw);
-
-    if (typeof parsed.title !== "string" || parsed.title.trim().length === 0) {
-      return yield* new ApiError({
-        message: "LLM returned empty commit message",
-        body: raw,
-      });
+      if (typeof hookFeedback === "string" && hookFeedback.trim().length > 0) {
+        promptParts.push(
+          `Previous attempt was rejected by the commit hook. Reason:\n${hookFeedback.trim()}`,
+        );
+      }
     }
 
-    return {
-      title: parsed.title.trim(),
-      bullets: Array.isArray(parsed.bullets)
-        ? parsed.bullets.filter(
-            (item): item is string => typeof item === "string" && item.trim().length > 0,
-          )
-        : [],
-      explanation: wrapExplanation(
-        typeof parsed.explanation === "string" ? parsed.explanation.trim() : "",
-      ),
-    } satisfies CommitMessage;
-  }).pipe(
-    Effect.retry({
-      while: (error) => ApiError.is(error) && isRetryableInvalidModelOutput(error),
-      schedule: llmInvalidOutputRetrySchedule,
-    }),
-  );
-});
+    const parsed = yield* callLlm(provider, systemPrompt, promptParts.join("\n\n"), 4096).pipe(
+      Effect.flatMap((raw) => decodeCommitMessageResponse(raw)),
+      mapInvalidLlmJsonResponse("generateCommitMessage", "LLM returned invalid commit message"),
+    );
+
+    return parsed satisfies CommitMessage;
+  },
+  Effect.retry({
+    while: (error) => isRetryableInvalidModelOutput(error),
+    schedule: llmInvalidOutputRetrySchedule,
+  }),
+);
 
 export interface PlanCommitsInput {
   readonly provider: ProviderConfig;
@@ -276,33 +409,31 @@ export interface PlanCommitsInput {
   readonly config: ProjectConfig;
 }
 
-export const planCommits = Effect.fn(function* ({
-  provider,
-  stagedFiles,
-  unstagedFiles,
-  intent,
-  config,
-}: PlanCommitsInput) {
-  const hasScopes = config.scopes.length > 0;
-  const promptParts: Array<string> = [];
-  if (typeof intent === "string" && intent.trim().length > 0) {
-    promptParts.push(`PRIMARY DIRECTIVE - focus only on this: ${intent.trim()}`);
-  }
-  if (hasScopes) {
-    promptParts.push(
-      `REQUIRED scopes (use the most appropriate one per group):\n- ${formatScopes(config)}`,
-    );
-  }
-  if (stagedFiles.length > 0) {
-    promptParts.push(
-      `Staged files (already selected by user - keep as group 0):\n${stagedFiles.join("\n")}`,
-    );
-  }
-  if (unstagedFiles.length > 0) {
-    promptParts.push(`Unstaged files:\n${unstagedFiles.join("\n")}`);
-  }
+export const planCommits = Effect.fn("LLM.PlanCommits")(
+  function* ({ provider, stagedFiles, unstagedFiles, intent, config }: PlanCommitsInput) {
+    const hasScopes = config.scopes.length > 0;
+    const promptParts: Array<string> = [];
 
-  return yield* Effect.gen(function* () {
+    if (typeof intent === "string" && intent.trim().length > 0) {
+      promptParts.push(`PRIMARY DIRECTIVE - focus only on this: ${intent.trim()}`);
+    }
+
+    if (hasScopes) {
+      promptParts.push(
+        `REQUIRED scopes (use the most appropriate one per group):\n- ${formatScopes(config)}`,
+      );
+    }
+
+    if (stagedFiles.length > 0) {
+      promptParts.push(
+        `Staged files (already selected by user - keep as group 0):\n${stagedFiles.join("\n")}`,
+      );
+    }
+
+    if (unstagedFiles.length > 0) {
+      promptParts.push(`Unstaged files:\n${unstagedFiles.join("\n")}`);
+    }
+
     const raw = yield* callLlm(
       provider,
       hasScopes ? planSystemPromptScoped : planSystemPrompt,
@@ -310,127 +441,64 @@ export const planCommits = Effect.fn(function* ({
       8192,
     );
 
-    const parsed = yield* parseJson<{
-      groups?: Array<{
-        files?: Array<string>;
-        title?: string;
-        bullets?: Array<string>;
-        explanation?: string;
-      }>;
-    }>(raw, "groups");
+    const parsed = yield* decodeCommitPlanResponse(raw).pipe(
+      mapInvalidLlmJsonResponse("planCommits", "LLM returned invalid plan"),
+    );
 
-    const groups =
-      parsed.groups?.map((group) => ({
-        files: Array.isArray(group.files)
-          ? group.files.filter(
-              (item): item is string => typeof item === "string" && item.trim().length > 0,
-            )
-          : [],
-        message:
-          typeof group.title === "string" && group.title.trim().length > 0
-            ? {
-                title: group.title.trim(),
-                bullets: Array.isArray(group.bullets)
-                  ? group.bullets.filter(
-                      (item): item is string => typeof item === "string" && item.trim().length > 0,
-                    )
-                  : [],
-                explanation: wrapExplanation(
-                  typeof group.explanation === "string" ? group.explanation.trim() : "",
-                ),
-              }
-            : undefined,
-      })) ?? [];
+    return parsed satisfies CommitPlan;
+  },
+  Effect.retry({
+    while: (error) => isRetryableInvalidModelOutput(error),
+    schedule: llmInvalidOutputRetrySchedule,
+  }),
+);
 
-    if (groups.length === 0) {
-      return yield* new ApiError({
-        message: "LLM returned empty plan",
-        body: raw,
-      });
-    }
-
-    return {
-      groups,
-    } satisfies CommitPlan;
-  }).pipe(
-    Effect.retry({
-      while: (error) => ApiError.is(error) && isRetryableInvalidModelOutput(error),
-      schedule: llmInvalidOutputRetrySchedule,
-    }),
-  );
-});
-
-export const detectTechnologies = Effect.fn(function* (
-  provider: ProviderConfig,
-  osName: string,
-  dirs: ReadonlyArray<string>,
-  files: ReadonlyArray<string>,
-) {
-  return yield* Effect.gen(function* () {
+export const detectTechnologies = Effect.fn(
+  function* (
+    provider: ProviderConfig,
+    osName: string,
+    dirs: ReadonlyArray<string>,
+    files: ReadonlyArray<string>,
+  ) {
     const raw = yield* callLlm(
       provider,
       detectTechSystemPrompt,
       `OS: ${osName}\n\nTop-level directories:\n${dirs.join("\n")}\n\nTracked files:\n${files.join("\n")}`,
       1024,
     );
-    const parsed = yield* parseJson<{ technologies?: Array<string> }>(raw, "technologies");
-    const technologies =
-      parsed.technologies?.filter(
-        (item): item is string => typeof item === "string" && item.trim().length > 0,
-      ) ?? [];
-    if (technologies.length === 0) {
-      return yield* new ApiError({
-        message: "LLM returned empty technologies",
-        body: raw,
-      });
-    }
-    return technologies;
-  }).pipe(
-    Effect.retry({
-      while: (error) => ApiError.is(error) && isRetryableInvalidModelOutput(error),
-      schedule: llmInvalidOutputRetrySchedule,
-    }),
-  );
-});
+    const parsed = yield* decodeTechnologiesResponse(raw).pipe(
+      mapInvalidLlmJsonResponse("detectTechnologies", "LLM returned invalid technologies"),
+    );
 
-export const generateScopes = Effect.fn(function* (
-  provider: ProviderConfig,
-  commits: ReadonlyArray<string>,
-  dirs: ReadonlyArray<string>,
-  files: ReadonlyArray<string>,
-) {
-  return yield* Effect.gen(function* () {
-    const raw = yield* callLlm(
+    return parsed;
+  },
+  Effect.retry({
+    while: (error) => isRetryableInvalidModelOutput(error),
+    schedule: llmInvalidOutputRetrySchedule,
+  }),
+);
+
+export const generateScopes = Effect.fn("LLM.GenerateScopes")(
+  function* (
+    provider: ProviderConfig,
+    commits: ReadonlyArray<string>,
+    dirs: ReadonlyArray<string>,
+    files: ReadonlyArray<string>,
+  ) {
+    const scopes = yield* callLlm(
       provider,
       generateScopesSystemPrompt,
       `Commit log (subject + changed files):\n${commits.join("\n---\n")}\n\nTop-level directories:\n${dirs.join("\n")}\n\nTracked files:\n${files.join("\n")}`,
       8192,
+    ).pipe(
+      Effect.flatMap((raw) => decodeProjectScopesResponse(raw)),
+      mapInvalidLlmJsonResponse("generateScopes", "LLM returned invalid scopes"),
     );
-    const parsed = yield* parseJson<{ scopes?: Array<ProjectScope> }>(raw, "scopes");
-    const scopes =
-      parsed.scopes?.filter(
-        (scope): scope is ProjectScope =>
-          typeof scope === "object" &&
-          scope != null &&
-          typeof scope.name === "string" &&
-          scope.name.trim().length > 0,
-      ) ?? [];
-    if (scopes.length === 0) {
-      return yield* new ApiError({
-        message: "LLM returned empty scopes",
-        body: raw,
-      });
-    }
-    return scopes.map((scope) => ({
-      name: scope.name.trim(),
-      ...(typeof scope.description === "string" && scope.description.trim().length > 0
-        ? { description: scope.description.trim() }
-        : {}),
-    }));
-  }).pipe(
-    Effect.retry({
-      while: (error) => ApiError.is(error) && isRetryableInvalidModelOutput(error),
-      schedule: llmInvalidOutputRetrySchedule,
-    }),
-  );
-});
+
+    return scopes;
+  },
+  Effect.retry({
+    while: (error) => isRetryableInvalidModelOutput(error),
+    schedule: llmInvalidOutputRetrySchedule,
+  }),
+);

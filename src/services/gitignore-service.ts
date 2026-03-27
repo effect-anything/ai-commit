@@ -1,10 +1,10 @@
 import { platform } from "node:os";
-import { Effect, FileSystem, Path } from "effect";
-import { HttpClient } from "effect/unstable/http";
-import { ApiError } from "../shared/errors";
-import { buildEnvironment } from "../config/env";
-import { detectTechnologies, type ProviderConfig } from "./openai-client";
-import type { VcsClient } from "./vcs";
+import { Cause, Effect, FileSystem, Path } from "effect";
+import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { ApiError } from "../shared/errors.ts";
+import { buildEnvironment } from "../config/env.ts";
+import { detectTechnologies, type ProviderConfig } from "./openai-client.ts";
+import type { VcsClient } from "./vcs.ts";
 
 const autoGenStart = "### git-agent auto-generated — DO NOT EDIT this block ###";
 const legacyAutoGenStart = "### git-agent auto-generated - DO NOT EDIT this block ###";
@@ -97,36 +97,20 @@ const mergeGitignore = (existing: string, generated: string): string => {
   return `${generated.trimEnd()}\n\n${customSection}\n${unique.join("\n")}\n`;
 };
 
-const fetchGitignore = Effect.fn(function* (technologies: ReadonlyArray<string>) {
+const fetchGitignore = Effect.fn("Config.FetchGitIgnore")(function* (
+  technologies: ReadonlyArray<string>,
+) {
   const env = yield* buildEnvironment;
   const baseUrl = env.gitignoreBaseUrl.replace(/\/$/, "");
   const url = `${baseUrl}/${technologies.map((item) => encodeURIComponent(item)).join(",")}`;
+
   return yield* HttpClient.get(url).pipe(
-    Effect.flatMap((response) =>
-      Effect.flatMap(response.text, (text) =>
-        response.status >= 200 && response.status < 300
-          ? Effect.succeed(text)
-          : Effect.failSync(
-              () =>
-                new ApiError({
-                  message: `failed to fetch gitignore template (${response.status})`,
-                  status: response.status,
-                  body: text,
-                }),
-            ),
-      ),
-    ),
-    Effect.mapError((cause) =>
-      ApiError.is(cause)
-        ? cause
-        : new ApiError({
-            message: cause instanceof Error ? cause.message : String(cause),
-          }),
-    ),
+    Effect.flatMap(HttpClientResponse.filterStatusOk),
+    Effect.flatMap((response) => response.text),
   );
 });
 
-export const generateGitignore = Effect.fn(function* (
+export const generateGitignore = Effect.fn("Config.GenerateGitignore")(function* (
   provider: ProviderConfig,
   vcs: VcsClient,
   cwd: string,
@@ -135,7 +119,11 @@ export const generateGitignore = Effect.fn(function* (
   const path = yield* Path.Path;
   const [dirs, files] = yield* Effect.all([vcs.topLevelDirs(cwd), vcs.projectFiles(cwd)]);
   let technologies = yield* detectTechnologies(provider, runtimeOs(), dirs, files);
-  const fetched = yield* fetchGitignore(technologies);
+  const fetched = yield* fetchGitignore(technologies).pipe(
+    Effect.catchCause((error) =>
+      Effect.die(`failed to fetch gitignore template (${Cause.pretty(error)})`),
+    ),
+  );
   const actualTechnologies = toptalTechs(fetched);
   if (actualTechnologies.length > 0) {
     technologies = actualTechnologies;
@@ -149,7 +137,8 @@ export const generateGitignore = Effect.fn(function* (
     Effect.mapError(
       (cause) =>
         new ApiError({
-          message: `failed to write .gitignore: ${cause.message}`,
+          message: "failed to write .gitignore",
+          cause,
         }),
     ),
   );
@@ -160,7 +149,8 @@ export const generateGitignore = Effect.fn(function* (
     Effect.mapError(
       (cause) =>
         new ApiError({
-          message: `failed to write .gitignore: ${cause.message}`,
+          message: `failed to write .gitignore`,
+          cause,
         }),
     ),
   );

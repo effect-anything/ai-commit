@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import type { ProjectScope } from "../domain/project";
-import { generateScopes, type ProviderConfig } from "./openai-client";
-import type { VcsClient } from "./vcs";
+import type { ProjectScope } from "../domain/project.ts";
+import { generateScopes, type ProviderConfig } from "./openai-client.ts";
+import type { VcsClient } from "./vcs.ts";
 
 const conventionalTypes = new Set([
   "build",
@@ -17,7 +17,7 @@ const conventionalTypes = new Set([
   "revert",
 ]);
 
-export const generateProjectScopes = Effect.fn(function* (
+export const generateProjectScopes = Effect.fn("Config.GenerateScopes")(function* (
   provider: ProviderConfig,
   vcs: VcsClient,
   cwd: string,
@@ -30,6 +30,7 @@ export const generateProjectScopes = Effect.fn(function* (
   ]);
 
   const scopes = yield* generateScopes(provider, commits, dirs, files);
+
   return scopes.filter((scope) => !conventionalTypes.has(scope.name.toLowerCase()));
 });
 

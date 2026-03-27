@@ -1,18 +1,26 @@
-import { Effect, Layer, ServiceMap } from "effect";
+import { Effect, Layer, Schema, ServiceMap } from "effect";
 import { FileSystem, Path } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner";
-import type { Trailer } from "../domain/commit";
-import { ProcessExecutionError, UnsupportedFeatureError } from "../shared/errors";
-import { runProcess, type ProcessResult, type RunProcessOptions } from "../shared/process";
-import { appendTrailers, countLines } from "../shared/text";
+import type { Trailer } from "../domain/commit.ts";
+import { ProcessExecutionError, UnsupportedFeatureError } from "../shared/errors.ts";
+import { runProcess, type ProcessResult, type RunProcessOptions } from "../shared/process.ts";
+import { appendTrailers, countLines } from "../shared/text.ts";
 
 export type VcsKind = "git" | "jj";
 
-export interface VcsDiff {
-  readonly files: ReadonlyArray<string>;
-  readonly content: string;
-  readonly lines: number;
-}
+export const VcsDiff = Schema.Struct({
+  files: Schema.Array(Schema.String),
+  content: Schema.String,
+  lines: Schema.Number,
+});
+export type VcsDiff = typeof VcsDiff.Type;
+
+const emptyDiff = () =>
+  VcsDiff.makeUnsafe({
+    files: [],
+    content: "",
+    lines: 0,
+  });
 
 interface IgnoreRules {
   readonly directoryNames: ReadonlySet<string>;
@@ -26,12 +34,6 @@ interface ScanState {
 }
 
 const internalDirectoryNames = new Set([".git", ".jj"]);
-
-const emptyDiff = (): VcsDiff => ({
-  files: [],
-  content: "",
-  lines: 0,
-});
 
 const normalizeLines = (value: string): Array<string> =>
   value
@@ -85,7 +87,9 @@ const emptyIgnoreRules = (): IgnoreRules => ({
 
 const toIgnoredDirectoryRule = (
   line: string,
-): { readonly name?: string; readonly relativePath?: string } | undefined => {
+):
+  | { readonly name?: string | undefined; readonly relativePath?: string | undefined }
+  | undefined => {
   const trimmed = line.trim();
   if (trimmed.length === 0 || trimmed.startsWith("#") || trimmed.startsWith("!")) {
     return undefined;
@@ -154,7 +158,7 @@ export interface VcsClient {
   readonly diffForFiles: (
     cwd: string,
     files: ReadonlyArray<string>,
-    revision?: string,
+    revision?: string | undefined,
   ) => Effect.Effect<VcsDiff, ProcessExecutionError>;
   readonly addAll: (cwd: string) => Effect.Effect<void, ProcessExecutionError>;
   readonly stageFiles: (
@@ -167,7 +171,7 @@ export interface VcsClient {
   readonly commit: (
     cwd: string,
     message: string,
-    files?: ReadonlyArray<string>,
+    files?: ReadonlyArray<string> | undefined,
   ) => Effect.Effect<string, ProcessExecutionError>;
   readonly amendCommit: (
     cwd: string,
@@ -199,12 +203,12 @@ export interface ResolvedVcs {
 export interface VcsService {
   readonly detect: (
     cwd: string,
-    preferred?: string,
+    preferred?: string | undefined,
   ) => Effect.Effect<VcsKind, ProcessExecutionError>;
   readonly get: (kind: VcsKind) => VcsClient;
   readonly resolve: (
     cwd: string,
-    preferred?: string,
+    preferred?: string | undefined,
   ) => Effect.Effect<ResolvedVcs, ProcessExecutionError>;
 }
 
@@ -273,7 +277,7 @@ export const GitClientLive = Layer.effect(
         return new Set([...fallbackIgnored, ...normalizeLines(result.stdout).map(toPortablePath)]);
       }
 
-      return yield* Effect.failSync(() => checkIgnoreError(result));
+      return yield* checkIgnoreError(result);
     });
 
     const buildScanState = Effect.fn(function* (root: string) {
@@ -296,7 +300,7 @@ export const GitClientLive = Layer.effect(
           (entry) =>
             fs.stat(path.join(root, entry)).pipe(
               Effect.map((info) => (info.type === "Directory" ? entry : undefined)),
-              Effect.catch(() => Effect.succeed(undefined)),
+              Effect.orElseSucceed(() => undefined),
             ),
         );
         const directoryEntries = maybeDirectoryEntries.filter(
@@ -595,7 +599,7 @@ export const JjClientLive = Layer.effect(
         return new Set([...fallbackIgnored, ...normalizeLines(result.stdout).map(toPortablePath)]);
       }
 
-      return yield* Effect.failSync(() => checkIgnoreError(result));
+      return yield* checkIgnoreError(result);
     });
 
     const buildScanState = Effect.fn(function* (root: string) {
@@ -612,7 +616,7 @@ export const JjClientLive = Layer.effect(
 
     const walkFiles: (
       state: ScanState,
-      cwd?: string,
+      cwd?: string | undefined,
     ) => Effect.Effect<Array<string>, ProcessExecutionError> = Effect.fn(function* (
       state: ScanState,
       cwd = state.root,
@@ -663,7 +667,7 @@ export const JjClientLive = Layer.effect(
           (entry) =>
             fs.stat(path.join(root, entry)).pipe(
               Effect.map((info) => (info.type === "Directory" ? entry : undefined)),
-              Effect.catch(() => Effect.succeed(undefined)),
+              Effect.orElseSucceed(() => undefined),
             ),
         );
         const directoryEntries = maybeDirectoryEntries.filter(
@@ -776,13 +780,9 @@ export const JjClientLive = Layer.effect(
       },
       addAll: () => Effect.void,
       stageFiles: () =>
-        Effect.failSync(
-          () => new UnsupportedFeatureError({ message: "jj does not support staging" }),
-        ),
+        Effect.fail(new UnsupportedFeatureError({ message: "jj does not support staging" })),
       unstageAll: () =>
-        Effect.failSync(
-          () => new UnsupportedFeatureError({ message: "jj does not support staging" }),
-        ),
+        Effect.fail(new UnsupportedFeatureError({ message: "jj does not support staging" })),
       commit: (cwd, message, files = []) =>
         Effect.map(
           run({
@@ -864,7 +864,7 @@ export const VcsLive = Layer.effect(
     const git = yield* GitClient;
     const jj = yield* JjClient;
 
-    const detect = Effect.fn(function* (cwd: string, preferred?: string) {
+    const detect = Effect.fn(function* (cwd: string, preferred?: string | undefined) {
       if (preferred === "git" || preferred === "jj") {
         return preferred;
       }
@@ -884,7 +884,7 @@ export const VcsLive = Layer.effect(
     return {
       detect,
       get: (kind) => (kind === "jj" ? jj : git),
-      resolve: Effect.fn(function* (cwd: string, preferred?: string) {
+      resolve: Effect.fn(function* (cwd: string, preferred?: string | undefined) {
         const kind = yield* detect(cwd, preferred);
         return {
           kind,
