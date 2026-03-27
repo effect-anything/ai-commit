@@ -1,5 +1,6 @@
-import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, layer } from "@effect/vitest";
+import { Effect, Layer } from "effect";
+import { it } from "vitest";
 import type { CommitGroup } from "../src/domain/commit.ts";
 import type { CommitRequest } from "../src/services/commit-service.ts";
 import {
@@ -28,27 +29,30 @@ const group = (files: ReadonlyArray<string>) =>
   }) satisfies CommitGroup;
 
 describe("ensureJjWorkingCopyMatchesPlan", () => {
-  it("succeeds when the working copy still matches the remaining groups", async () => {
-    await expect(
-      Effect.runPromise(
-        ensureJjWorkingCopyMatchesPlan(makeRequest(["src/feature.ts"]), [
+  layer(Layer.empty)((it) => {
+    it.effect(
+      "succeeds when the working copy still matches the remaining groups",
+      Effect.fn(function* () {
+        yield* ensureJjWorkingCopyMatchesPlan(makeRequest(["src/feature.ts"]), [
           group(["src/feature.ts"]),
-        ]) as Effect.Effect<void, unknown, never>,
-      ),
-    ).resolves.toBeUndefined();
-  });
+        ]);
+      }),
+    );
 
-  it("fails when unexpected files appear in the jj working copy", async () => {
-    await expect(
-      Effect.runPromise(
-        ensureJjWorkingCopyMatchesPlan(makeRequest(["src/feature.ts", "src/unexpected.ts"]), [
-          group(["src/feature.ts"]),
-        ]) as Effect.Effect<void, unknown, never>,
-      ),
-    ).rejects.toMatchObject({
-      message:
-        "jj working copy drifted after commit; expected remaining files: src/feature.ts; actual remaining files: src/feature.ts, src/unexpected.ts",
-    });
+    it.effect(
+      "fails when unexpected files appear in the jj working copy",
+      Effect.fn(function* () {
+        const error = yield* Effect.flip(
+          ensureJjWorkingCopyMatchesPlan(makeRequest(["src/feature.ts", "src/unexpected.ts"]), [
+            group(["src/feature.ts"]),
+          ]),
+        );
+
+        expect(error.message).toBe(
+          "jj working copy drifted after commit; expected remaining files: src/feature.ts; actual remaining files: src/feature.ts, src/unexpected.ts",
+        );
+      }),
+    );
   });
 });
 

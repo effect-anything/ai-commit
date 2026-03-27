@@ -7,8 +7,9 @@ import { createJjRepo, writeTextFile } from "./integration/helpers.ts";
 describe.concurrent("Vcs", () => {
   layer(Layer.mergeAll(NodeServices.layer, VcsLive.pipe(Layer.provide(NodeServices.layer))))(
     (it) => {
-      it.effect("jj filesystem scan respects ignored directories from .gitignore", () =>
-        Effect.gen(function* () {
+      it.effect(
+        "jj filesystem scan respects ignored directories from .gitignore",
+        Effect.fn(function* () {
           const repo = yield* createJjRepo();
           yield* writeTextFile(repo, ".gitignore", "node_modules/\ndist/\npackages/tmp/\n");
           yield* writeTextFile(repo, "src/app.ts", "export const value = 1;\n");
@@ -16,12 +17,10 @@ describe.concurrent("Vcs", () => {
           yield* writeTextFile(repo, "packages/tmp/generated.ts", "export const ignored = true;\n");
           yield* writeTextFile(repo, "node_modules/lib/index.js", "module.exports = 1;\n");
           yield* writeTextFile(repo, "dist/out.js", "export const built = true;\n");
-
           const vcsService = yield* Vcs;
           const { client } = yield* vcsService.resolve(repo, "jj");
           const dirs = yield* client.topLevelDirs(repo);
           const files = yield* client.projectFiles(repo);
-
           expect(dirs).toEqual(["packages", "src"]);
           expect(files).toContain("packages/app/index.ts");
           expect(files).toContain("src/app.ts");
@@ -31,17 +30,16 @@ describe.concurrent("Vcs", () => {
         }),
       );
 
-      it.effect("jj filesystem scan keeps traversing directories with negated descendants", () =>
-        Effect.gen(function* () {
+      it.effect(
+        "jj filesystem scan keeps traversing directories with negated descendants",
+        Effect.fn(function* () {
           const repo = yield* createJjRepo();
           yield* writeTextFile(repo, ".gitignore", "dist/*\n!dist/keep/\n!dist/keep/**\n");
           yield* writeTextFile(repo, "dist/drop/out.js", "export const drop = true;\n");
           yield* writeTextFile(repo, "dist/keep/in.js", "export const keep = true;\n");
-
           const vcsService = yield* Vcs;
           const { client } = yield* vcsService.resolve(repo, "jj");
           const files = yield* client.projectFiles(repo);
-
           expect(files).toContain("dist/keep/in.js");
           expect(files).not.toContain("dist/drop/out.js");
         }),

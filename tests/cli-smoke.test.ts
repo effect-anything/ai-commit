@@ -41,7 +41,7 @@ afterEach(() => {
   }
 });
 
-describe("cli smoke", () => {
+describe.concurrent("cli smoke", () => {
   it("prints the package version", () => {
     const result = runCli(["version"]);
 

@@ -1,13 +1,11 @@
 import { NodeServices } from "@effect/platform-node";
-import { Effect } from "effect";
+import { describe, expect, layer } from "@effect/vitest";
+import { Effect, Layer } from "effect";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { executeHooks, type HookInput } from "../src/services/hooks.ts";
-
-const runEffect = <A>(effect: Effect.Effect<A, unknown, any>) =>
-  Effect.runPromise(Effect.provide(effect, NodeServices.layer) as Effect.Effect<A, unknown, never>);
+import { afterEach } from "vitest";
+import { HookService, HookServiceLive, type HookInput } from "../src/services/hooks.ts";
 
 const hookInput: HookInput = {
   diff: "",
@@ -35,26 +33,36 @@ afterEach(() => {
   }
 });
 
-describe("executeHooks", () => {
-  it("fails when a configured shell hook is missing", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "git-agent-hooks-"));
-    tempDirs.push(dir);
-    const hookPath = join(dir, "missing-hook.sh");
+describe("HookService", () => {
+  layer(HookServiceLive.pipe(Layer.provide(NodeServices.layer)))((it) => {
+    it.effect(
+      "fails when a configured shell hook is missing",
+      Effect.fn(function* () {
+        const dir = mkdtempSync(join(tmpdir(), "git-agent-hooks-"));
+        tempDirs.push(dir);
+        const hookPath = join(dir, "missing-hook.sh");
+        const hookService = yield* HookService;
 
-    await expect(runEffect(executeHooks([hookPath], hookInput))).rejects.toMatchObject({
-      message: expect.stringContaining(`failed to read hook "${hookPath}"`),
-    });
-  });
+        const error = yield* Effect.flip(hookService.execute([hookPath], hookInput));
 
-  it("fails for non-executable hook files", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "git-agent-hooks-"));
-    tempDirs.push(dir);
-    const hookPath = join(dir, "hook.sh");
-    writeFileSync(hookPath, "#!/bin/sh\nexit 0\n");
-    chmodSync(hookPath, 0o644);
+        expect(error.message).toContain(`failed to read hook "${hookPath}"`);
+      }),
+    );
 
-    await expect(runEffect(executeHooks([hookPath], hookInput))).rejects.toMatchObject({
-      message: `hook is not executable: ${hookPath}`,
-    });
+    it.effect(
+      "fails for non-executable hook files",
+      Effect.fn(function* () {
+        const dir = mkdtempSync(join(tmpdir(), "git-agent-hooks-"));
+        tempDirs.push(dir);
+        const hookPath = join(dir, "hook.sh");
+        writeFileSync(hookPath, "#!/bin/sh\nexit 0\n");
+        chmodSync(hookPath, 0o644);
+        const hookService = yield* HookService;
+
+        const error = yield* Effect.flip(hookService.execute([hookPath], hookInput));
+
+        expect(error.message).toBe(`hook is not executable: ${hookPath}`);
+      }),
+    );
   });
 });
