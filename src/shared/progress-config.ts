@@ -1,4 +1,4 @@
-import type { ProgressAttributeDescriptor, ProgressRenderConfig } from "./tracing";
+import type { ProgressAttributeDescriptor, ProgressRenderConfig } from "./tracing.ts";
 
 const hiddenAttributePrefixes = ["http.request.header.", "http.response.header."];
 
@@ -18,7 +18,6 @@ const hiddenAttributeKeys = new Set([
 
 const orderedInteractiveAttributeKeys = [
   "vcs",
-  "requested_vcs",
   "dry_run",
   "no_stage",
   "amend",
@@ -57,32 +56,21 @@ const interactiveLabelByKey: Record<string, string> = {
 };
 
 const friendlySpanNames: Record<string, string> = {
-  "commit.prepare-request": "Prepare commit",
-  "commit.run": "Run commit",
-  "commit.resolve-provider": "Resolve provider",
-  "commit.load-project-config": "Load project config",
-  "commit.scan-changes": "Scan changes",
-  "commit.plan-groups": "Plan commits",
-  "commit.resolve-message": "Resolve commit message",
-  "commit.refresh-scopes": "Refresh scopes",
-  "commit.replan-groups": "Replan commits",
-  "commit.generate-message": "Generate commit message",
-  "commit.run-hooks": "Run commit hooks",
-  "commit.create": "Create commit",
-  "commit.load-previous": "Load previous commit",
-  "commit.generate-amend-message": "Generate amended message",
-  "commit.amend": "Amend commit",
-  "init.run": "Run init",
-  "init.resolve-provider": "Resolve provider",
-  "init.initialize-repository": "Initialize repository",
-  "init.generate-gitignore": "Generate .gitignore",
-  "init.generate-scopes": "Generate scopes",
-  "init.write-default-hook": "Write default hook",
-  "init.write-hook": "Write hook config",
-  "init.write-project-config": "Write project config",
-  "config.resolve-provider": "Resolve provider config",
-  "config.resolve-field": "Resolve config value",
-  "hooks.execute": "Run hook",
+  "Commit.ScanChanges": "Scan changes",
+  "Commit.PlanGroups": "Plan commits",
+  "Commit.ResolveMessage": "Resolve commit message",
+  "Commit.ReplanGroups": "Replan commits",
+  "Commit.Create": "Create commit",
+  "Commit.create": "Create commit",
+  "Commit.LoadPrevious": "Load previous commit",
+  "Commit.Amend": "Amend commit",
+  "Config.GenerateGitignore": "Generate .gitignore",
+  "Config.GenerateScopes": "Generate scopes",
+  "Config.ResolveProvider": "Resolve provider",
+  "Init.WriteDefaultHook": "Write default hook",
+  "Init.WriteHook": "Write hook config",
+  "LLM.GenerateMessage": "Generate commit message",
+  "LLM.PlanCommits": "Plan commits",
   "LanguageModel.generateText": "Call model",
 };
 
@@ -141,7 +129,7 @@ const toDescriptors = (
     key: string,
     value: unknown,
     label = simplifyInteractiveLabel(key),
-    dedupeKey?: string,
+    dedupeKey?: string | undefined,
   ) => {
     if (value === undefined || value === null) {
       return;

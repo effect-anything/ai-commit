@@ -1,4 +1,4 @@
-import type { Trailer } from "../domain/commit";
+import type { Trailer } from "../domain/commit.ts";
 
 export const countLines = (content: string): number => {
   if (content.length === 0) {

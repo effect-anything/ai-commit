@@ -1,6 +1,6 @@
 import { clearScreenDown, cursorTo, moveCursor } from "node:readline";
-import { Cause, Duration, Effect, Exit, Layer, ServiceMap, Tracer } from "effect";
-import { renderError } from "./errors";
+import { Cause, Duration, Effect, Exit, Layer, Schema, ServiceMap, Tracer } from "effect";
+import { renderError } from "./errors.ts";
 
 type ProgressStatus = "running" | "done" | "failed" | "interrupted";
 
@@ -34,59 +34,73 @@ interface CompactAttributeToken {
 
 export type ProgressRenderMode = "interactive" | "raw";
 
-export interface ProgressAttributeDescriptor {
-  readonly key: string;
-  readonly label?: string;
-  readonly value: unknown;
-  readonly dedupeKey?: string;
-}
+export const ProgressAttributeDescriptor = Schema.Struct({
+  key: Schema.String,
+  label: Schema.optionalKey(Schema.String),
+  value: Schema.Unknown,
+  dedupeKey: Schema.optionalKey(Schema.String),
+});
 
-export interface ProgressAttributeFormatInput {
-  readonly key: string;
-  readonly value: unknown;
-  readonly defaultLabel: string;
-}
+export type ProgressAttributeDescriptor = typeof ProgressAttributeDescriptor.Type;
 
-export interface ProgressAttributeFormatOutput {
-  readonly label?: string;
-  readonly value?: unknown;
-  readonly dedupeKey?: string;
-}
+export const ProgressAttributeFormatInput = Schema.Struct({
+  key: Schema.String,
+  value: Schema.Unknown,
+  defaultLabel: Schema.String,
+});
 
-export interface ProgressStatusSymbols {
-  readonly runningParent: string;
-  readonly success: string;
-  readonly failed: string;
-  readonly interrupted: string;
-}
+export type ProgressAttributeFormatInput = typeof ProgressAttributeFormatInput.Type;
+
+export const ProgressAttributeFormatOutput = Schema.Struct({
+  label: Schema.optionalKey(Schema.String),
+  value: Schema.optionalKey(Schema.Unknown),
+  dedupeKey: Schema.optionalKey(Schema.String),
+});
+
+export type ProgressAttributeFormatOutput = typeof ProgressAttributeFormatOutput.Type;
+
+export const ProgressStatusSymbols = Schema.Struct({
+  runningParent: Schema.String,
+  success: Schema.String,
+  failed: Schema.String,
+  interrupted: Schema.String,
+});
+
+export type ProgressStatusSymbols = typeof ProgressStatusSymbols.Type;
 
 export interface ProgressRenderConfig {
-  readonly headerLabel?: string;
-  readonly spinnerFrames?: ReadonlyArray<string>;
-  readonly symbols?: Partial<ProgressStatusSymbols>;
-  readonly formatSpanName?: (
-    name: string,
-    options: {
-      readonly mode: ProgressRenderMode;
-      readonly span: Tracer.Span;
-    },
-  ) => string;
-  readonly formatAttributes?: (
-    input: {
-      readonly attributes: ReadonlyMap<string, unknown>;
-    },
-    options: {
-      readonly mode: ProgressRenderMode;
-      readonly span: Tracer.Span;
-    },
-  ) => ReadonlyArray<ProgressAttributeDescriptor> | undefined;
-  readonly formatAttribute?: (
-    attribute: ProgressAttributeFormatInput,
-    options: {
-      readonly mode: ProgressRenderMode;
-      readonly span: Tracer.Span;
-    },
-  ) => ProgressAttributeFormatOutput | undefined;
+  readonly headerLabel?: string | undefined;
+  readonly spinnerFrames?: ReadonlyArray<string> | undefined;
+  readonly symbols?: Partial<ProgressStatusSymbols> | undefined;
+  readonly formatSpanName?:
+    | ((
+        name: string,
+        options: {
+          readonly mode: ProgressRenderMode;
+          readonly span: Tracer.Span;
+        },
+      ) => string)
+    | undefined;
+  readonly formatAttributes?:
+    | ((
+        input: {
+          readonly attributes: ReadonlyMap<string, unknown>;
+        },
+        options: {
+          readonly mode: ProgressRenderMode;
+          readonly span: Tracer.Span;
+        },
+      ) => ReadonlyArray<ProgressAttributeDescriptor> | undefined)
+    | undefined;
+  readonly formatAttribute?:
+    | ((
+        attribute: ProgressAttributeFormatInput,
+        options: {
+          readonly mode: ProgressRenderMode;
+          readonly span: Tracer.Span;
+        },
+      ) => ProgressAttributeFormatOutput | undefined)
+    | undefined;
 }
 
 const defaultHeaderLabel = "progress";

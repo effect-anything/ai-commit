@@ -8,6 +8,7 @@ export class CliUsageError extends Schema.TaggedErrorClass<CliUsageError>()("Cli
 
 export class ConfigError extends Schema.TaggedErrorClass<ConfigError>()("ConfigError", {
   message: Schema.String,
+  cause: Schema.optional(Schema.Unknown),
 }) {
   static is = Schema.is(this);
 }
@@ -28,6 +29,7 @@ export class ApiError extends Schema.TaggedErrorClass<ApiError>()("ApiError", {
   message: Schema.String,
   status: Schema.optional(Schema.Number),
   body: Schema.optional(Schema.String),
+  cause: Schema.optional(Schema.Unknown),
 }) {
   static is = Schema.is(this);
 }
@@ -65,16 +67,16 @@ export const renderError = (error: unknown): string => {
   if (ConfigError.is(error)) {
     return error.message;
   }
-  if (ApiError.is(error)) {
-    const parts = [error.message];
-    if (typeof error.status === "number") {
-      parts.push(`status: ${error.status}`);
-    }
-    if (typeof error.body === "string" && error.body.trim().length > 0) {
-      parts.push(error.body.trim());
-    }
-    return parts.join("\n");
-  }
+  // if (ApiError.is(error)) {
+  //   const parts = [error.message];
+  //   if (typeof error.status === "number") {
+  //     parts.push(`status: ${error.status}`);
+  //   }
+  //   if (typeof error.body === "string" && error.body.trim().length > 0) {
+  //     parts.push(error.body.trim());
+  //   }
+  //   return parts.join("\n");
+  // }
   if (ProcessExecutionError.is(error)) {
     const details = error.stderr.trim().length > 0 ? error.stderr.trim() : error.stdout.trim();
     return `${error.command} exited with code ${error.exitCode}${details.length > 0 ? `\n${details}` : ""}`;

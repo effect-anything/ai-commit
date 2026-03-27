@@ -1,5 +1,5 @@
 import { Console, Effect } from "effect";
-import type { SingleCommitResult } from "../domain/commit";
+import type { SingleCommitResult } from "../domain/commit.ts";
 
 const indent = (value: string, prefix = "   "): string =>
   value

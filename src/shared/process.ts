@@ -1,20 +1,22 @@
-import { Effect, Stream } from "effect";
+import { Effect, Schema, Stream } from "effect";
 import { ChildProcess } from "effect/unstable/process";
-import { ProcessExecutionError } from "./errors";
+import { ProcessExecutionError } from "./errors.ts";
 
-export interface ProcessResult {
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly exitCode: number;
-}
+export const ProcessResult = Schema.Struct({
+  stdout: Schema.String,
+  stderr: Schema.String,
+  exitCode: Schema.Number,
+});
+
+export type ProcessResult = typeof ProcessResult.Type;
 
 export interface RunProcessOptions {
   readonly command: string;
-  readonly args?: ReadonlyArray<string>;
-  readonly cwd?: string;
-  readonly env?: Record<string, string | undefined>;
-  readonly stdin?: string;
-  readonly allowFailure?: boolean;
+  readonly args?: ReadonlyArray<string> | undefined;
+  readonly cwd?: string | undefined;
+  readonly env?: Record<string, string | undefined> | undefined;
+  readonly stdin?: string | undefined;
+  readonly allowFailure?: boolean | undefined;
 }
 
 const encoder = new TextEncoder();
@@ -70,8 +72,8 @@ export const runProcess = ({
     }).pipe(
       Effect.catch((cause) =>
         ProcessExecutionError.is(cause)
-          ? Effect.failSync(() => cause)
-          : Effect.failSync(() => toProcessExecutionError(command, args, cause)),
+          ? Effect.fail(cause)
+          : Effect.fail(toProcessExecutionError(command, args, cause)),
       ),
     ),
   );
