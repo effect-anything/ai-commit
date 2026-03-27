@@ -28,6 +28,7 @@
   },
   "files": [
     "dist",
+    "schemas",
     "src",
     "README.md",
     "LICENSE"
@@ -51,11 +52,12 @@
     "format:check": "oxfmt --check .",
     "typecheck": "tsgo --noEmit",
     "test": "vitest run",
+    "generate:schemas": "bun run scripts/generate-config-schemas.ts",
     "check": "bun run lint && bun run format:check && bun run typecheck && bun run test && bun run build",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "changeset publish --provenance",
-    "prepack": "bun run build"
+    "prepack": "bun run build && bun run generate:schemas"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.7",
@@ -70,8 +72,7 @@
     "oxfmt": "^0.42.0",
     "oxlint": "^1.57.0",
     "tsdown": "^0.21.6",
-    "vitest": "^4.1.2",
-    "yaml": "^2.8.1"
+    "vitest": "^4.1.2"
   },
   "engines": {
     "bun": ">=1.3.10",
@@ -85,5 +86,10 @@
     "ini": "6.0.0",
     "toml": "3.0.0",
     "yaml": "2.8.3"
+  },
+  "knip": {
+    "ignoreDependencies": [
+      "@effect/language-service"
+    ]
   }
 }
