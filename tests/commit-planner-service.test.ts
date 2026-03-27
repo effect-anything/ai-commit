@@ -13,7 +13,7 @@ const makeInput = (overrides: Partial<PlanCommitsInput> = {}): PlanCommitsInput 
     apiKey: "test-key",
     baseUrl: "https://example.test/v1",
     model: "test-model",
-    noGitAgentCoAuthor: false,
+    noCommitCoAuthor: false,
     noModelCoAuthor: false,
   },
   stagedFiles: ["src/staged.ts"],

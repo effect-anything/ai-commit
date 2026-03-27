@@ -37,10 +37,10 @@ describe("config keys", () => {
   });
 
   it("fails when project config contains malformed hook values", async () => {
-    const repoRoot = mkdtempSync(join(tmpdir(), "git-agent-config-"));
+    const repoRoot = mkdtempSync(join(tmpdir(), "ai-commit-config-"));
     tempDirs.push(repoRoot);
-    mkdirSync(join(repoRoot, ".git-agent"), { recursive: true });
-    writeFileSync(join(repoRoot, ".git-agent", "config.yml"), "hook: 123\n");
+    mkdirSync(join(repoRoot, ".ai-commit"), { recursive: true });
+    writeFileSync(join(repoRoot, ".ai-commit", "config.yml"), "hook: 123\n");
 
     await expect(runEffect(loadProjectConfig(repoRoot))).rejects.toMatchObject({
       message: expect.stringContaining("invalid config"),

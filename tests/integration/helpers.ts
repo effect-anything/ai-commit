@@ -155,24 +155,24 @@ export const chmodFile = (pathValue: string, mode: number) =>
 export const createGitRepo = Effect.fn(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const root = yield* createTempDir("git-agent-git-");
+  const root = yield* createTempDir("ai-commit-git-");
   const dir = path.join(root, "repo");
   yield* fs.makeDirectory(dir, { recursive: true });
   yield* run("git", ["init"], dir);
-  yield* run("git", ["config", "user.name", "Git Agent Test"], dir);
-  yield* run("git", ["config", "user.email", "git-agent@example.com"], dir);
+  yield* run("git", ["config", "user.name", "Ai Commit Test"], dir);
+  yield* run("git", ["config", "user.email", "ai-commit@example.com"], dir);
   return dir;
 });
 
 export const createJjRepo = Effect.fn(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const root = yield* createTempDir("git-agent-jj-");
+  const root = yield* createTempDir("ai-commit-jj-");
   const dir = path.join(root, "repo");
   yield* fs.makeDirectory(dir, { recursive: true });
   yield* run("jj", ["git", "init", "."], dir);
-  yield* run("jj", ["config", "set", "--repo", "user.name", "Git Agent Test"], dir);
-  yield* run("jj", ["config", "set", "--repo", "user.email", "git-agent@example.com"], dir);
+  yield* run("jj", ["config", "set", "--repo", "user.name", "Ai Commit Test"], dir);
+  yield* run("jj", ["config", "set", "--repo", "user.email", "ai-commit@example.com"], dir);
   return dir;
 });
 

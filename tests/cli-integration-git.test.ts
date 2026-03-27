@@ -27,7 +27,7 @@ const seedGitRepoWithScopes = Effect.fn(function* () {
   const repo = yield* seedGitRepo();
   yield* writeTextFile(
     repo,
-    ".git-agent/config.yml",
+    ".ai-commit/config.yml",
     projectScopesConfig([
       ["api", "Backend API handlers"],
       ["web", "Frontend pages"],
@@ -70,7 +70,7 @@ describe.concurrent("CLI integration (git)", () => {
 
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain("scopes written");
-        const config = yield* readTextFile(repo, ".git-agent/config.yml");
+        const config = yield* readTextFile(repo, ".ai-commit/config.yml");
         expect(config).toContain("name: api");
         expect(config).toContain("description: Backend API handlers");
         expect(config).toContain("name: web");
@@ -118,7 +118,7 @@ describe.concurrent("CLI integration (git)", () => {
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain(".gitignore updated: node, visualstudiocode");
         const content = yield* readTextFile(repo, ".gitignore");
-        expect(content).toContain("### git-agent auto-generated");
+        expect(content).toContain("### ai-commit auto-generated");
         expect(content).toContain("# Technologies: node, visualstudiocode");
         expect(content).toContain("node_modules/");
         expect(content).toContain(".vscode/");
@@ -331,7 +331,7 @@ describe.concurrent("CLI integration (git)", () => {
 
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain("feat(api): update routes");
-        expect(yield* fileExists(repo, ".git-agent/config.yml")).toBe(false);
+        expect(yield* fileExists(repo, ".ai-commit/config.yml")).toBe(false);
         expect(llm.requests).toHaveLength(3);
       }),
     );
@@ -430,7 +430,7 @@ describe.concurrent("CLI integration (git)", () => {
         const repo = yield* createGitRepo();
         yield* writeTextFile(
           repo,
-          ".git-agent/config.yml",
+          ".ai-commit/config.yml",
           "scopes:\n  - name: core\n    description: Shared application logic\nhook:\n  - conventional\n",
         );
         yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");
@@ -586,7 +586,7 @@ describe.concurrent("CLI integration (git)", () => {
         const repo = yield* createGitRepo();
         yield* writeTextFile(
           repo,
-          ".git-agent/config.yml",
+          ".ai-commit/config.yml",
           "scopes:\n  - name: core\n    description: Shared application logic\nhook:\n  - conventional\n",
         );
         yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");

@@ -26,13 +26,13 @@ const seedJjRepoWithScopes = Effect.fn(function* () {
   const repo = yield* seedJjRepo();
   yield* writeTextFile(
     repo,
-    ".git-agent/config.yml",
+    ".ai-commit/config.yml",
     projectScopesConfig([
       ["cli", "Command line flows"],
       ["core", "Shared application logic"],
     ]),
   );
-  yield* jjCommitAll(repo, "chore: add repo config", [".git-agent/config.yml"]);
+  yield* jjCommitAll(repo, "chore: add repo config", [".ai-commit/config.yml"]);
   return repo;
 });
 
@@ -75,7 +75,7 @@ describe.concurrent("CLI integration (jj)", () => {
         expect(result.stdout).toContain(".gitignore updated: node");
         expect(result.stdout).toContain("scopes written");
 
-        const config = yield* readTextFile(repo, ".git-agent/config.yml");
+        const config = yield* readTextFile(repo, ".ai-commit/config.yml");
         const ignore = yield* readTextFile(repo, ".gitignore");
         expect(config).toContain("name: core");
         expect(config).toContain("hook:");
@@ -345,11 +345,11 @@ describe.concurrent("CLI integration (jj)", () => {
         const repo = yield* createJjRepo();
         yield* writeTextFile(
           repo,
-          ".git-agent/config.yml",
+          ".ai-commit/config.yml",
           "scopes:\n  - name: core\n    description: Shared application logic\nhook:\n  - conventional\n",
         );
         yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");
-        yield* jjCommitAll(repo, "chore: seed repo", [".git-agent/config.yml", "src/app.ts"]);
+        yield* jjCommitAll(repo, "chore: seed repo", [".ai-commit/config.yml", "src/app.ts"]);
         yield* writeTextFile(repo, "src/app.ts", "export const value = 'next';\n");
 
         const firstTitle =
@@ -412,11 +412,11 @@ describe.concurrent("CLI integration (jj)", () => {
         const repo = yield* createJjRepo();
         yield* writeTextFile(
           repo,
-          ".git-agent/config.yml",
+          ".ai-commit/config.yml",
           "scopes:\n  - name: core\n    description: Shared application logic\nhook:\n  - conventional\n",
         );
         yield* writeTextFile(repo, "src/app.ts", "export const value = 'base';\n");
-        yield* jjCommitAll(repo, "chore: seed repo", [".git-agent/config.yml", "src/app.ts"]);
+        yield* jjCommitAll(repo, "chore: seed repo", [".ai-commit/config.yml", "src/app.ts"]);
         yield* writeTextFile(repo, "src/app.ts", "export const value = 'next';\n");
 
         const badMessage = {

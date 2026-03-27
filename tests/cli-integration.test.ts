@@ -16,8 +16,8 @@ describe.concurrent("CLI integration", () => {
       "get prefers local hook over project hook",
       Effect.fn(function* () {
         const repo = yield* createGitRepo();
-        yield* writeTextFile(repo, ".git-agent/config.yml", "hook:\n  - conventional\n");
-        yield* writeTextFile(repo, ".git-agent/config.local.yml", "hook:\n  - empty\n");
+        yield* writeTextFile(repo, ".ai-commit/config.yml", "hook:\n  - conventional\n");
+        yield* writeTextFile(repo, ".ai-commit/config.local.yml", "hook:\n  - empty\n");
 
         const result = yield* runCli(["config", "get", "hook"], {
           cwd: repo,
@@ -30,7 +30,7 @@ describe.concurrent("CLI integration", () => {
     );
 
     it.effect(
-      "config set hook installs the script into .git-agent/hooks",
+      "config set hook installs the script into .ai-commit/hooks",
       Effect.fn(function* () {
         const repo = yield* createGitRepo();
         const hookPath = yield* writeTextFile(repo, "scripts/pre-commit.sh", "#!/bin/sh\nexit 0\n");
@@ -42,8 +42,8 @@ describe.concurrent("CLI integration", () => {
 
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain(`installed hook: ${hookPath}`);
-        expect(yield* fileExists(repo, ".git-agent/hooks/pre-commit")).toBe(true);
-        expect(yield* readTextFile(repo, ".git-agent/config.yml")).toContain(hookPath);
+        expect(yield* fileExists(repo, ".ai-commit/hooks/pre-commit")).toBe(true);
+        expect(yield* readTextFile(repo, ".ai-commit/config.yml")).toContain(hookPath);
       }),
     );
 
@@ -78,7 +78,7 @@ describe.concurrent("CLI integration", () => {
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain("set model = gpt-4o-mini  (user)");
 
-        const userConfig = yield* readTextFile(repo, "../.xdg/git-agent/config.yml");
+        const userConfig = yield* readTextFile(repo, "../.xdg/ai-commit/config.yml");
         expect(userConfig).toContain("model: gpt-4o-mini");
       }),
     );
@@ -93,7 +93,7 @@ describe.concurrent("CLI integration", () => {
         );
 
         expect(result.exitCode).not.toBe(0);
-        expect(yield* fileExists(repo, ".git-agent/config.yml")).toBe(false);
+        expect(yield* fileExists(repo, ".ai-commit/config.yml")).toBe(false);
       }),
     );
 

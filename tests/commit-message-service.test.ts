@@ -16,7 +16,7 @@ const makeInput = (
     apiKey: "test-key",
     baseUrl: "https://example.test/v1",
     model: "test-model",
-    noGitAgentCoAuthor: false,
+    noCommitCoAuthor: false,
     noModelCoAuthor: false,
   },
   diff: {

@@ -26,7 +26,7 @@ const runCli = (
   });
 
 const newGitRepo = (): string => {
-  const dir = mkdtempSync(join(tmpdir(), "git-agent-cli-"));
+  const dir = mkdtempSync(join(tmpdir(), "ai-commit-"));
   tempDirs.push(dir);
   execFileSync("git", ["init"], { cwd: dir, stdio: "ignore" });
   return dir;
@@ -63,16 +63,16 @@ describe.concurrent("cli smoke", () => {
     const result = runCli(["wat"]);
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('Unknown subcommand "wat" for "git-agent"');
+    expect(result.stderr).toContain('Unknown subcommand "wat" for "ai-commit"');
     expect(result.stderr).not.toContain("~effect/cli/CliError/ShowHelp");
     expect(result.stderr).not.toContain("Help requested");
   });
 
   it("config get prefers local hook over project hook", () => {
     const dir = newGitRepo();
-    mkdirSync(join(dir, ".git-agent"), { recursive: true });
-    writeFileSync(join(dir, ".git-agent", "config.yml"), "hook:\n  - conventional\n");
-    writeFileSync(join(dir, ".git-agent", "config.local.yml"), "hook:\n  - empty\n");
+    mkdirSync(join(dir, ".ai-commit"), { recursive: true });
+    writeFileSync(join(dir, ".ai-commit", "config.yml"), "hook:\n  - conventional\n");
+    writeFileSync(join(dir, ".ai-commit", "config.local.yml"), "hook:\n  - empty\n");
 
     const result = runCli(["config", "get", "--cwd", dir, "hook"]);
     expect(result.status).toBe(0);
@@ -99,7 +99,7 @@ describe.concurrent("cli smoke", () => {
 
   it("config show resolves provider settings from environment", () => {
     const dir = newGitRepo();
-    const xdgHome = mkdtempSync(join(tmpdir(), "git-agent-cli-xdg-"));
+    const xdgHome = mkdtempSync(join(tmpdir(), "ai-commit-xdg-"));
     tempDirs.push(xdgHome);
 
     const result = runCli(["config", "show", "--cwd", dir], {
@@ -130,13 +130,13 @@ describe.concurrent("cli smoke", () => {
 
   it("init --local reports the local config path when it already exists", () => {
     const dir = newGitRepo();
-    mkdirSync(join(dir, ".git-agent"), { recursive: true });
-    writeFileSync(join(dir, ".git-agent", "config.local.yml"), "hook:\n  - conventional\n");
+    mkdirSync(join(dir, ".ai-commit"), { recursive: true });
+    writeFileSync(join(dir, ".ai-commit", "config.local.yml"), "hook:\n  - conventional\n");
 
     const result = runCli(["init", "--cwd", dir, "--local", "--hook", "conventional"]);
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(join(dir, ".git-agent", "config.local.yml"));
-    expect(result.stderr).not.toContain(join(dir, ".git-agent", "config.yml"));
+    expect(result.stderr).toContain(join(dir, ".ai-commit", "config.local.yml"));
+    expect(result.stderr).not.toContain(join(dir, ".ai-commit", "config.yml"));
   });
 });

@@ -17,7 +17,7 @@ const hookInput: HookInput = {
     scopes: [],
     hooks: [],
     maxDiffLines: 0,
-    noGitAgentCoAuthor: false,
+    noCommitCoAuthor: false,
     noModelCoAuthor: false,
   },
 };
@@ -38,7 +38,7 @@ describe("HookService", () => {
     it.effect(
       "fails when a configured shell hook is missing",
       Effect.fn(function* () {
-        const dir = mkdtempSync(join(tmpdir(), "git-agent-hooks-"));
+        const dir = mkdtempSync(join(tmpdir(), "ai-commit-hooks-"));
         tempDirs.push(dir);
         const hookPath = join(dir, "missing-hook.sh");
         const hookService = yield* HookService;
@@ -52,7 +52,7 @@ describe("HookService", () => {
     it.effect(
       "fails for non-executable hook files",
       Effect.fn(function* () {
-        const dir = mkdtempSync(join(tmpdir(), "git-agent-hooks-"));
+        const dir = mkdtempSync(join(tmpdir(), "gai-commit-hooks-"));
         tempDirs.push(dir);
         const hookPath = join(dir, "hook.sh");
         writeFileSync(hookPath, "#!/bin/sh\nexit 0\n");
