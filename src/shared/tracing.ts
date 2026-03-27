@@ -1,5 +1,5 @@
 import { clearScreenDown, cursorTo, moveCursor } from "node:readline";
-import { Cause, Duration, Effect, Exit, Layer, Schema, ServiceMap, Tracer } from "effect";
+import { Cause, Duration, Effect, Exit, Layer, Option, Schema, ServiceMap, Tracer } from "effect";
 import { renderError } from "./errors.ts";
 
 type ProgressStatus = "running" | "done" | "failed" | "interrupted";
@@ -313,7 +313,7 @@ const renderRawAttributesWithConfig = (
 };
 
 const toParentId = (span: Tracer.Span): string | undefined =>
-  span.parent == null ? undefined : span.parent.spanId;
+  span.parent == null ? undefined : Option.getOrUndefined(Option.map(span.parent, (_) => _.spanId));
 
 const isPureInterrupt = (exit: Exit.Exit<unknown, unknown>): boolean => {
   if (!Exit.isFailure(exit)) {
