@@ -1,4 +1,4 @@
-import { Effect, Layer, Schema, ServiceMap } from "effect";
+import { Effect, Layer, Schema, Context } from "effect";
 import { FileSystem, Path } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner";
 import type { Trailer } from "../domain/commit.ts";
@@ -16,7 +16,7 @@ export const VcsDiff = Schema.Struct({
 export type VcsDiff = typeof VcsDiff.Type;
 
 const emptyDiff = () =>
-  VcsDiff.makeUnsafe({
+  VcsDiff.make({
     files: [],
     content: "",
     lines: 0,
@@ -227,7 +227,7 @@ interface VcsService {
   ) => Effect.Effect<ResolvedVcs, ProcessExecutionError>;
 }
 
-class GitClient extends ServiceMap.Service<GitClient, VcsClient>()("@ai-commit/GitClient") {}
+class GitClient extends Context.Service<GitClient, VcsClient>()("@ai-commit/GitClient") {}
 
 const GitClientLive = Layer.effect(
   GitClient,
@@ -608,7 +608,7 @@ const GitClientLive = Layer.effect(
   }),
 );
 
-class JjClient extends ServiceMap.Service<JjClient, VcsClient>()("@ai-commit/JjClient") {}
+class JjClient extends Context.Service<JjClient, VcsClient>()("@ai-commit/JjClient") {}
 
 const JjClientLive = Layer.effect(
   JjClient,
@@ -934,7 +934,7 @@ const JjClientLive = Layer.effect(
   }),
 );
 
-export class Vcs extends ServiceMap.Service<Vcs, VcsService>()("@ai-commit/Vcs") {}
+export class Vcs extends Context.Service<Vcs, VcsService>()("@ai-commit/Vcs") {}
 
 export const VcsLive = Layer.effect(
   Vcs,

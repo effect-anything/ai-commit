@@ -1,5 +1,5 @@
 import * as OpenAi from "@effect/ai-openai";
-import { Effect, Layer, pipe, Redacted, Schedule, ServiceMap } from "effect";
+import { Effect, Layer, pipe, Redacted, Schedule, Context } from "effect";
 import { AiError, LanguageModel } from "effect/unstable/ai";
 import { HttpClient } from "effect/unstable/http";
 import type { ProviderConfig } from "../config/provider.ts";
@@ -66,7 +66,7 @@ interface LlmClientService {
   readonly call: (input: LlmCallInput) => Effect.Effect<string, ApiError | AiError.AiError>;
 }
 
-export class LlmClient extends ServiceMap.Service<LlmClient, LlmClientService>()(
+export class LlmClient extends Context.Service<LlmClient, LlmClientService>()(
   "@ai-commit/LlmClient",
 ) {}
 

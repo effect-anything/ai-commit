@@ -8,7 +8,7 @@ import {
   Schedule,
   Schema,
   SchemaTransformation,
-  ServiceMap,
+  Context,
 } from "effect";
 import type { ProviderConfig } from "../config/provider.ts";
 import type { ProjectScope } from "../domain/project.ts";
@@ -116,7 +116,7 @@ interface ScopeServiceShape {
   ) => Effect.Effect<ReadonlyArray<ProjectScope>, ApiError | AiError.AiError>;
 }
 
-export class ScopeService extends ServiceMap.Service<ScopeService, ScopeServiceShape>()(
+export class ScopeService extends Context.Service<ScopeService, ScopeServiceShape>()(
   "@ai-commit/ScopeService",
 ) {}
 

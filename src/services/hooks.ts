@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Formatter, Layer, Path, Schema, ServiceMap } from "effect";
+import { Effect, FileSystem, Formatter, Layer, Path, Schema, Context } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner";
 import { ProjectConfig } from "../domain/project.ts";
 import { ConfigError } from "../shared/errors.ts";
@@ -61,7 +61,7 @@ interface HookServiceShape {
   ) => Effect.Effect<InstalledHookValue, ConfigError>;
 }
 
-export class HookService extends ServiceMap.Service<HookService, HookServiceShape>()(
+export class HookService extends Context.Service<HookService, HookServiceShape>()(
   "@ai-commit/HookService",
 ) {}
 

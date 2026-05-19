@@ -9,7 +9,7 @@ import {
   Schedule,
   Schema,
   SchemaTransformation,
-  ServiceMap,
+  Context,
 } from "effect";
 import type {
   CommitGroup,
@@ -126,9 +126,9 @@ const CompactTrimmedStringArray = Schema.Array(TrimmedString).pipe(
     }),
   ),
 );
-const OptionalTrimmedString = TrimmedString.pipe(Schema.withDecodingDefaultKey(() => ""));
+const OptionalTrimmedString = TrimmedString.pipe(Schema.withDecodingDefaultKey(Effect.succeed("")));
 const OptionalCompactTrimmedStringArray = CompactTrimmedStringArray.pipe(
-  Schema.withDecodingDefaultKey(() => []),
+  Schema.withDecodingDefaultKey(Effect.succeed([])),
 );
 
 const CommitMessageResponse = makeLlmJsonResponse(
@@ -228,12 +228,12 @@ interface CommitPlannerServiceShape {
   ) => Effect.Effect<{ readonly groups: ReadonlyArray<CommitGroup> }, ApiError | AiError.AiError>;
 }
 
-export class CommitMessageService extends ServiceMap.Service<
+export class CommitMessageService extends Context.Service<
   CommitMessageService,
   CommitMessageServiceShape
 >()("@ai-commit/CommitMessageService") {}
 
-export class CommitPlannerService extends ServiceMap.Service<
+export class CommitPlannerService extends Context.Service<
   CommitPlannerService,
   CommitPlannerServiceShape
 >()("@ai-commit/CommitPlannerService") {}
@@ -434,7 +434,7 @@ interface CommitServiceShape {
   >;
 }
 
-export class CommitService extends ServiceMap.Service<CommitService, CommitServiceShape>()(
+export class CommitService extends Context.Service<CommitService, CommitServiceShape>()(
   "@ai-commit/CommitService",
 ) {}
 
