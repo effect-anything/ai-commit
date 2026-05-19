@@ -7,7 +7,6 @@ import { makeCliProgram, makePlatformLayer } from "../../src/cli-app.ts";
 import { runProcess, type ProcessResult } from "../../src/shared/process.ts";
 
 const mockLlmBaseUrl = "https://mock-llm.invalid/v1";
-const mockGitignoreBaseUrl = "https://mock-gitignore.invalid";
 const textDecoder = new TextDecoder();
 let cliRunQueue: Promise<void> = Promise.resolve();
 
@@ -39,12 +38,6 @@ interface MockLlmServer {
   readonly baseUrl: string;
   readonly requests: Array<MockLlmRequest>;
   readonly remainingResponses: () => number;
-  readonly handler: MockHttpHandler;
-}
-
-interface MockGitignoreServer {
-  readonly baseUrl: string;
-  readonly requests: Array<string>;
   readonly handler: MockHttpHandler;
 }
 
@@ -458,40 +451,6 @@ export const startMockLlmServer = (responses: ReadonlyArray<MockLlmResponse>) =>
       remainingResponses: () => responses.length - index,
       handler,
     } satisfies MockLlmServer;
-  });
-
-export const startMockGitignoreServer = (templates: Record<string, string>) =>
-  Effect.sync(() => {
-    const requests: Array<string> = [];
-
-    const handler: MockHttpHandler = ({ url }) => {
-      const requestUrl = new URL(url);
-      if (requestUrl.origin !== "https://mock-gitignore.invalid") {
-        return undefined;
-      }
-
-      requests.push(`${requestUrl.pathname}${requestUrl.search}`);
-      const key = decodeURIComponent(requestUrl.pathname.replace(/^\/+/, ""));
-      const template = templates[key];
-
-      if (template == null) {
-        return new Response("missing template", {
-          status: 404,
-          headers: { "content-type": "text/plain; charset=utf-8" },
-        });
-      }
-
-      return new Response(template, {
-        status: 200,
-        headers: { "content-type": "text/plain; charset=utf-8" },
-      });
-    };
-
-    return {
-      baseUrl: mockGitignoreBaseUrl,
-      requests,
-      handler,
-    } satisfies MockGitignoreServer;
   });
 
 export const projectScopesConfig = (scopes: ReadonlyArray<readonly [string, string?]>) =>

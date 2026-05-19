@@ -9,7 +9,6 @@ import {
   projectScopesConfig,
   readTextFile,
   runCli,
-  startMockGitignoreServer,
   startMockLlmServer,
   trimmedLines,
   writeTextFile,
@@ -40,50 +39,35 @@ const seedJjRepoWithScopes = Effect.fn(function* () {
 describe.concurrent("CLI integration (jj)", () => {
   layer(NodeServices.layer)((it) => {
     it.effect(
-      "jj init full wizard writes scopes, gitignore, and default conventional hook",
+      "jj init full wizard writes scopes and default conventional hook",
       Effect.fn(function* () {
         const repo = yield* seedJjRepo();
         const llm = yield* startMockLlmServer([
-          {
-            content: {
-              technologies: ["node"],
-            },
-          },
           {
             content: {
               scopes: [{ name: "core", description: "Shared application logic" }],
             },
           },
         ]);
-        const gitignore = yield* startMockGitignoreServer({
-          node: "# Created by https://www.toptal.com/developers/gitignore/api/node\nnode_modules/\n",
-        });
 
         const result = yield* runCli(
           ["init", "--api-key", "test-key", "--base-url", llm.baseUrl, "--model", "test-model"],
           {
             cwd: repo,
-            env: {
-              GIT_AGENT_GITIGNORE_BASE_URL: gitignore.baseUrl,
-            },
-            httpClientLayer: makeMockHttpClientLayer(llm.handler, gitignore.handler),
+            httpClientLayer: makeMockHttpClientLayer(llm.handler),
           },
         );
 
         expect(result.exitCode).toBe(0);
-        expect(result.stdout).toContain("Generate .gitignore");
         expect(result.stdout).toContain("Generate scopes");
         expect(result.stdout).toContain("Write default hook");
-        expect(result.stdout).toContain(".gitignore updated: node");
         expect(result.stdout).toContain("scopes written");
 
         const config = yield* readTextFile(repo, ".ai-commit/config.json");
-        const ignore = yield* readTextFile(repo, ".gitignore");
         expect(config).toContain('"name": "core"');
         expect(config).toContain('"hook": [');
         expect(config).toContain('"conventional"');
-        expect(ignore).toContain("node_modules/");
-        expect(llm.requests).toHaveLength(2);
+        expect(llm.requests).toHaveLength(1);
       }),
     );
 

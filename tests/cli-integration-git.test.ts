@@ -11,7 +11,6 @@ import {
   projectScopesConfig,
   readTextFile,
   runCli,
-  startMockGitignoreServer,
   startMockLlmServer,
   trimmedLines,
   writeTextFile,
@@ -93,100 +92,6 @@ describe.concurrent("CLI integration (git)", () => {
         expect(config).toContain('"description": "Backend API handlers"');
         expect(config).toContain('"name": "web"');
         expect(llm.requests).toHaveLength(1);
-      }),
-    );
-
-    it.effect(
-      "git init --gitignore merges generated rules and preserves custom entries",
-      Effect.fn(function* () {
-        const repo = yield* seedGitRepo();
-        yield* writeTextFile(repo, ".gitignore", "dist/\n\n# keep me\ncustom.cache\n");
-
-        const llm = yield* startMockLlmServer([
-          {
-            content: {
-              technologies: ["node", "visualstudiocode"],
-            },
-          },
-        ]);
-        const gitignore = yield* startMockGitignoreServer({
-          "node,visualstudiocode":
-            "# Created by https://www.toptal.com/developers/gitignore/api/node,visualstudiocode\nnode_modules/\n.vscode/\n",
-        });
-
-        const result = yield* runCli(
-          [
-            "init",
-            "--gitignore",
-            "--api-key",
-            "test-key",
-            "--base-url",
-            llm.baseUrl,
-            "--model",
-            "test-model",
-          ],
-          {
-            cwd: repo,
-            env: {
-              GIT_AGENT_GITIGNORE_BASE_URL: gitignore.baseUrl,
-            },
-            httpClientLayer: makeMockHttpClientLayer(llm.handler, gitignore.handler),
-          },
-        );
-
-        expect(result.exitCode).toBe(0);
-        expect(result.stdout).toContain(".gitignore updated: node, visualstudiocode");
-        const content = yield* readTextFile(repo, ".gitignore");
-        expect(content).toContain("### ai-commit auto-generated");
-        expect(content).toContain("# Technologies: node, visualstudiocode");
-        expect(content).toContain("node_modules/");
-        expect(content).toContain(".vscode/");
-        expect(content).toContain("### custom rules ###");
-        expect(content).toContain("custom.cache");
-        expect(gitignore.requests).toEqual(["/node,visualstudiocode"]);
-      }),
-    );
-
-    it.effect(
-      "git init --gitignore works when project config already exists",
-      Effect.fn(function* () {
-        const repo = yield* seedGitRepo();
-        yield* writeTextFile(repo, ".ai-commit/config.json", '{\n  "hook": ["conventional"]\n}\n');
-
-        const llm = yield* startMockLlmServer([
-          {
-            content: {
-              technologies: ["node"],
-            },
-          },
-        ]);
-        const gitignore = yield* startMockGitignoreServer({
-          node: "# Created by https://www.toptal.com/developers/gitignore/api/node\nnode_modules/\n",
-        });
-
-        const result = yield* runCli(
-          [
-            "init",
-            "--gitignore",
-            "--api-key",
-            "test-key",
-            "--base-url",
-            llm.baseUrl,
-            "--model",
-            "test-model",
-          ],
-          {
-            cwd: repo,
-            env: {
-              GIT_AGENT_GITIGNORE_BASE_URL: gitignore.baseUrl,
-            },
-            httpClientLayer: makeMockHttpClientLayer(llm.handler, gitignore.handler),
-          },
-        );
-
-        expect(result.exitCode).toBe(0);
-        expect(result.stdout).toContain(".gitignore updated: node");
-        expect(yield* readTextFile(repo, ".ai-commit/config.json")).toContain("conventional");
       }),
     );
 
