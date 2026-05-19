@@ -2,7 +2,6 @@ import { Console, Effect, FileSystem } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { ConfigService } from "../config/service.ts";
 import { emptyProjectConfig } from "../domain/project.ts";
-import { GitignoreService } from "../services/gitignore-service.ts";
 import { ScopeService } from "../services/scope-service.ts";
 import { Vcs } from "../services/vcs.ts";
 import { ConfigError } from "../shared/errors.ts";
@@ -25,10 +24,7 @@ export const commandInit = Command.make(
     baseUrl: baseUrlFlag,
     model: modelFlag,
     scope: Flag.boolean("scope").pipe(Flag.withDescription("Generate scopes via AI.")),
-    gitignore: Flag.boolean("gitignore").pipe(Flag.withDescription("Generate .gitignore via AI.")),
-    force: Flag.boolean("force").pipe(
-      Flag.withDescription("Overwrite existing config or .gitignore."),
-    ),
+    force: Flag.boolean("force").pipe(Flag.withDescription("Overwrite existing config.")),
     maxCommits: Flag.integer("max-commits").pipe(
       Flag.withDefault(200),
       Flag.withDescription("Maximum commit count to analyze for scopes."),
@@ -45,7 +41,6 @@ export const commandInit = Command.make(
     const configService = yield* ConfigService;
     yield* Effect.annotateCurrentSpan({
       force: input.force,
-      gitignore: input.gitignore,
       local: input.local,
       vcs: toOptionalString(input.vcs) ?? "auto",
       scope: input.scope,
@@ -71,12 +66,11 @@ export const commandInit = Command.make(
 
     const repoRoot = yield* vcs.repoRoot(input.cwd);
     const doScope = input.scope;
-    const doGitignore = input.gitignore;
-    const fullWizard = !input.scope && !input.gitignore && hooks.length === 0;
+    const fullWizard = !input.scope && hooks.length === 0;
 
-    if (input.local && !doScope && !doGitignore && hooks.length === 0) {
+    if (input.local && !doScope && hooks.length === 0) {
       return yield* new ConfigError({
-        message: "--local requires at least one action flag: --scope, --gitignore, or --hook",
+        message: "--local requires at least one action flag: --scope or --hook",
       });
     }
 
@@ -101,24 +95,14 @@ export const commandInit = Command.make(
       model: toOptionalString(input.model),
     });
 
-    if ((doGitignore || doScope || fullWizard) && provider.apiKey.length === 0) {
+    if ((doScope || fullWizard) && provider.apiKey.length === 0) {
       return yield* new ConfigError({
         message:
           "no API key configured (hint: set --api-key or add api_key to ~/.config/ai-commit/config.json)",
       });
     }
 
-    const gitignoreService = yield* GitignoreService;
     const scopeService = yield* ScopeService;
-
-    if (doGitignore || fullWizard) {
-      const techs = yield* gitignoreService.generateGitignore({
-        provider,
-        vcs,
-        cwd: repoRoot,
-      });
-      yield* Console.log(`.gitignore updated: ${techs.join(", ")}`);
-    }
 
     if (doScope || fullWizard) {
       const scopes = yield* scopeService.generateProjectScopes({
@@ -143,7 +127,7 @@ export const commandInit = Command.make(
       );
     }
 
-    if (!doScope && !doGitignore && !fullWizard && hooks.length > 0) {
+    if (!doScope && !fullWizard && hooks.length > 0) {
       yield* configService.mergeScopes(configPath, emptyProjectConfig().scopes);
     }
   }),

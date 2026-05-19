@@ -7,7 +7,7 @@ import PackageJson from "../package.json" with { type: "json" };
 import { commandRoot } from "./commands/root.ts";
 import { ConfigServiceLive } from "./config/service.ts";
 import { CommitLlmServicesLive, CommitServiceLive } from "./services/commit-service.ts";
-import { GitignoreServiceLive } from "./services/gitignore-service.ts";
+
 import { HookServiceLive } from "./services/hooks.ts";
 import { LlmClientLive } from "./services/openai-client.ts";
 import { ScopeServiceLive } from "./services/scope-service.ts";
@@ -37,11 +37,9 @@ const makeServicesLayer = (
     Layer.provideMerge(Layer.mergeAll(platform, configProvider)),
   );
 
-  const featureServices = Layer.mergeAll(
-    CommitLlmServicesLive,
-    ScopeServiceLive,
-    GitignoreServiceLive,
-  ).pipe(Layer.provideMerge(Layer.mergeAll(coreServices, configServices)));
+  const featureServices = Layer.mergeAll(CommitLlmServicesLive, ScopeServiceLive).pipe(
+    Layer.provideMerge(Layer.mergeAll(coreServices, configServices)),
+  );
 
   const commitRuntime = CommitServiceLive.pipe(
     Layer.provideMerge(Layer.mergeAll(coreServices, configServices, featureServices)),
