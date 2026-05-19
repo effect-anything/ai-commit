@@ -56,7 +56,7 @@
     "check": "bun run lint && bun run format:check && bun run typecheck && bun run test && bun run build",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "changeset publish --provenance",
+    "release": "changeset publish",
     "prepack": "bun run build && bun run generate:schemas"
   },
   "devDependencies": {
