@@ -64,7 +64,6 @@ const friendlySpanNames: Record<string, string> = {
   "Commit.create": "Create commit",
   "Commit.LoadPrevious": "Load previous commit",
   "Commit.Amend": "Amend commit",
-  "Config.GenerateGitignore": "Generate .gitignore",
   "Config.GenerateScopes": "Generate scopes",
   "Config.ResolveProvider": "Resolve provider",
   "Init.WriteDefaultHook": "Write default hook",

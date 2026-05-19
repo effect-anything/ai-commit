@@ -1,5 +1,5 @@
 import { clearScreenDown, cursorTo, moveCursor } from "node:readline";
-import { Cause, Duration, Effect, Exit, Layer, Option, Schema, ServiceMap, Tracer } from "effect";
+import { Cause, Duration, Effect, Exit, Layer, Option, Schema, Context, Tracer } from "effect";
 import { renderError } from "./errors.ts";
 
 type ProgressStatus = "running" | "done" | "failed" | "interrupted";
@@ -803,7 +803,7 @@ class ProgressTreeRenderer implements ProgressLoggerService {
   }
 }
 
-class ProgressLogger extends ServiceMap.Service<ProgressLogger, ProgressLoggerService>()(
+class ProgressLogger extends Context.Service<ProgressLogger, ProgressLoggerService>()(
   "@ai-commit/ProgressLogger",
 ) {}
 
