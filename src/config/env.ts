@@ -2,7 +2,6 @@ import { Config, Effect, Option } from "effect";
 
 export const DefaultBaseUrl = "https://api.openai.com/v1";
 export const DefaultModel = "gpt-5-nano";
-const DefaultGitignoreBaseUrl = "https://www.toptal.com/developers/gitignore/api";
 
 const envString = (name: string) => Config.string(name);
 
@@ -28,17 +27,12 @@ export const buildEnvironment = Effect.gen(function* () {
     DefaultBaseUrl,
   );
   const model = yield* readPreferredEnv(["OPENAI_MODEL", "GIT_AGENT_BUILD_MODEL"], DefaultModel);
-  const gitignoreBaseUrl = yield* envStringWithDefault(
-    "GIT_AGENT_GITIGNORE_BASE_URL",
-    DefaultGitignoreBaseUrl,
-  );
   const xdgConfigHome = yield* envOptionalString("XDG_CONFIG_HOME");
 
   return {
     apiKey,
     baseUrl,
     model,
-    gitignoreBaseUrl,
     xdgConfigHome,
   };
 });

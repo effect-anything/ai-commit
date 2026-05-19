@@ -83,7 +83,6 @@ Running `init` with no action flags performs the full setup flow:
 
 - auto-detect `git` vs `jj`
 - initialize a repository if the current directory is not one yet
-- generate or merge `.gitignore`
 - generate project `scopes` from directories and commit history
 - write `.ai-commit/config.json`
 - enable the built-in `conventional` hook by default
@@ -245,7 +244,7 @@ ai-commit config set --scope local hook empty
 ```
 
 `init --local` cannot run by itself. It must be combined with at least one of:
-`--scope`, `--gitignore`, or `--hook`.
+`--scope`, or `--hook`.
 
 ## Initializing a Project
 
@@ -261,12 +260,6 @@ Use this when onboarding a repository.
 
 ```bash
 ai-commit init --scope
-```
-
-### Generate `.gitignore` only
-
-```bash
-ai-commit init --gitignore
 ```
 
 ### Configure a hook only
@@ -396,7 +389,7 @@ In practice, local override config wins over shared project config.
 ## Notes
 
 - `ai-commit commit` always needs a usable API key.
-- `ai-commit init` also needs an API key when running the full setup flow, `--scope`, or `--gitignore`.
+- `ai-commit init` also needs an API key when running the full setup flow, `--scope`.
 - `--no-stage` is supported for `git` only, not `jj`.
 - `.ai-commit/config.local.json` is meant for local overrides and usually should not be committed.
 
@@ -408,7 +401,6 @@ ai-commit config show
 ai-commit config get hook
 ai-commit init
 ai-commit init --scope
-ai-commit init --gitignore
 ai-commit commit --dry-run
 ai-commit commit --intent "split auth fix"
 ai-commit commit --amend
@@ -450,7 +442,6 @@ ai-commit init
 
 - 自动识别 `git` / `jj`
 - 如果当前目录不是仓库则先初始化仓库
-- 生成或补全 `.gitignore`
 - 生成 `scopes`
 - 写入 `.ai-commit/config.json`
 - 默认启用 `conventional` hook

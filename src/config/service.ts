@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { Effect, FileSystem, Layer, Option, Path, Schema, ServiceMap } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, Schema, Context } from "effect";
 import type { ProjectConfig, ProjectScope } from "../domain/project.ts";
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner";
 import { ConfigError } from "../shared/errors.ts";
@@ -146,7 +146,7 @@ interface ConfigServiceShape {
   ) => Effect.Effect<void, ConfigError>;
 }
 
-export class ConfigService extends ServiceMap.Service<ConfigService, ConfigServiceShape>()(
+export class ConfigService extends Context.Service<ConfigService, ConfigServiceShape>()(
   "@ai-commit/ConfigService",
 ) {}
 
