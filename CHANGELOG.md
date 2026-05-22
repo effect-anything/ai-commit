@@ -1,5 +1,11 @@
 # @effect-x/ai-commit
 
+## 0.0.4
+
+### Patch Changes
+
+- 9c034d8: upgrade packages
+
 ## 0.0.3
 
 ### Patch Changes
