@@ -237,35 +237,34 @@ const GitClientLive = Layer.effect(
     const spawner = yield* ChildProcessSpawner;
     const run = makeRunProcess(spawner);
 
-    const loadIgnoreRules = Effect.fn(function* (root: string) {
-      const gitignorePath = path.join(root, ".gitignore");
-      const exists = yield* fs
-        .exists(gitignorePath)
-        .pipe(Effect.mapError((cause) => processError("readIgnoreRules", cause)));
-      if (!exists) {
-        return emptyIgnoreRules();
-      }
-
-      const content = yield* fs
-        .readFileString(gitignorePath, "utf8")
-        .pipe(Effect.mapError((cause) => processError("readIgnoreRules", cause)));
-
-      const directoryNames = new Set<string>();
-      const relativePaths = new Set<string>();
-      for (const line of content.split("\n")) {
-        const rule = toIgnoredDirectoryRule(line);
-        if (rule?.name != null) {
-          directoryNames.add(rule.name);
+    const loadIgnoreRules = Effect.fn(
+      function* (root: string) {
+        const gitignorePath = path.join(root, ".gitignore");
+        const exists = yield* fs.exists(gitignorePath);
+        if (!exists) {
+          return emptyIgnoreRules();
         }
-        if (rule?.relativePath != null) {
-          relativePaths.add(rule.relativePath);
+
+        const content = yield* fs.readFileString(gitignorePath, "utf8");
+
+        const directoryNames = new Set<string>();
+        const relativePaths = new Set<string>();
+        for (const line of content.split("\n")) {
+          const rule = toIgnoredDirectoryRule(line);
+          if (rule?.name != null) {
+            directoryNames.add(rule.name);
+          }
+          if (rule?.relativePath != null) {
+            relativePaths.add(rule.relativePath);
+          }
         }
-      }
-      return {
-        directoryNames,
-        relativePaths,
-      } satisfies IgnoreRules;
-    });
+        return {
+          directoryNames,
+          relativePaths,
+        } satisfies IgnoreRules;
+      },
+      Effect.mapError((cause) => processError("readIgnoreRules", cause)),
+    );
 
     const ignoredPaths = Effect.fn(function* (
       state: ScanState,
@@ -618,35 +617,34 @@ const JjClientLive = Layer.effect(
     const spawner = yield* ChildProcessSpawner;
     const run = makeRunProcess(spawner);
 
-    const loadIgnoreRules = Effect.fn(function* (root: string) {
-      const gitignorePath = path.join(root, ".gitignore");
-      const exists = yield* fs
-        .exists(gitignorePath)
-        .pipe(Effect.mapError((cause) => processError("readIgnoreRules", cause)));
-      if (!exists) {
-        return emptyIgnoreRules();
-      }
-
-      const content = yield* fs
-        .readFileString(gitignorePath, "utf8")
-        .pipe(Effect.mapError((cause) => processError("readIgnoreRules", cause)));
-
-      const directoryNames = new Set<string>();
-      const relativePaths = new Set<string>();
-      for (const line of content.split("\n")) {
-        const rule = toIgnoredDirectoryRule(line);
-        if (rule?.name != null) {
-          directoryNames.add(rule.name);
+    const loadIgnoreRules = Effect.fn(
+      function* (root: string) {
+        const gitignorePath = path.join(root, ".gitignore");
+        const exists = yield* fs.exists(gitignorePath);
+        if (!exists) {
+          return emptyIgnoreRules();
         }
-        if (rule?.relativePath != null) {
-          relativePaths.add(rule.relativePath);
+
+        const content = yield* fs.readFileString(gitignorePath, "utf8");
+
+        const directoryNames = new Set<string>();
+        const relativePaths = new Set<string>();
+        for (const line of content.split("\n")) {
+          const rule = toIgnoredDirectoryRule(line);
+          if (rule?.name != null) {
+            directoryNames.add(rule.name);
+          }
+          if (rule?.relativePath != null) {
+            relativePaths.add(rule.relativePath);
+          }
         }
-      }
-      return {
-        directoryNames,
-        relativePaths,
-      } satisfies IgnoreRules;
-    });
+        return {
+          directoryNames,
+          relativePaths,
+        } satisfies IgnoreRules;
+      },
+      Effect.mapError((cause) => processError("readIgnoreRules", cause)),
+    );
 
     const ignoredPaths = Effect.fn(function* (
       state: ScanState,
