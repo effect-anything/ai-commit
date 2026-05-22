@@ -1,7 +1,7 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  entry: ["src/cli.ts"],
+  entry: ["src/bin.ts"],
   outDir: "dist",
   platform: "node",
   format: "esm",
@@ -9,6 +9,16 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   fixedExtension: false,
+  outputOptions: {
+    comments: false,
+  },
+  minify: {
+    codegen: { removeWhitespace: false },
+    compress: true,
+    mangle: true,
+  },
+  treeshake: true,
+  target: ["node24", "esnext"],
   ignoreWatch: [
     ".git",
     ".repo",
@@ -22,5 +32,4 @@ export default defineConfig({
     "bun.lock",
     "flake.lock",
   ],
-  exports: { all: true },
 });

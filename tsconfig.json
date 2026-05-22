@@ -38,7 +38,7 @@
   },
   "include": ["./src", "./tests", "./package.json", "./tsdown.config.ts"],
   "exclude": [
-    ".repo/**/*",
+    ".references/**/*",
     ".direnv/**/*",
     ".lalph/**/*",
     ".codemogger/**/*",
