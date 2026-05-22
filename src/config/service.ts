@@ -241,7 +241,6 @@ export const ConfigServiceLive = Layer.effect(
           Effect.mapError((cause) => configError(`failed to write config ${pathValue}`, cause)),
         );
       yield* fs
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
         .writeFileString(pathValue, `${JSON.stringify(rawMap, null, 2)}\n`, { mode: 0o644 })
         .pipe(
           Effect.mapError((cause) => configError(`failed to write config ${pathValue}`, cause)),

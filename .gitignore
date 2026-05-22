@@ -11,9 +11,9 @@ logs/
 dist
 node_modules
 
-.repo/*
-!.repo/
-!.repo/clone-reference-repos.sh
+.references/*
+!.references/
+!.references/clone-reference-repos.sh
 
 .lalph
 .specs
