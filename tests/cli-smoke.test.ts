@@ -16,7 +16,7 @@ const runCli = (
       }
     | undefined,
 ) =>
-  spawnSync("node", ["src/cli.ts", ...args], {
+  spawnSync("node", ["src/bin.ts", ...args], {
     cwd: options?.cwd ?? repoRoot,
     encoding: "utf8",
     env: {
