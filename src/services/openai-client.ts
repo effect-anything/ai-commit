@@ -5,10 +5,10 @@ import { HttpClient } from "effect/unstable/http";
 import type { ProviderConfig } from "../config/provider.ts";
 import { ApiError } from "../shared/errors.ts";
 
-const llmTransientRetrySchedule = Schedule.either(
+const llmTransientRetrySchedule = Schedule.min([
   Schedule.exponential("250 millis"),
   Schedule.spaced("2 seconds"),
-).pipe(Schedule.jittered, Schedule.take(2));
+]).pipe(Schedule.jittered, Schedule.upTo({ times: 2 }));
 
 const normalizeModelId = (model: string): string =>
   model
@@ -38,11 +38,9 @@ const makeLanguageModelLayer = (config: ProviderConfig, maxOutputTokens: number)
       ? {
           max_output_tokens: maxOutputTokens,
           reasoning: { effort: "low" },
-          temperature: 0,
         }
       : {
           max_output_tokens: maxOutputTokens,
-          temperature: 0,
         },
   }).pipe(
     Layer.provide(

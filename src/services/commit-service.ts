@@ -40,34 +40,32 @@ const maxHookRetries = 3;
 const maxReplans = 2;
 const maxCommitGroups = 5;
 
-const llmInvalidOutputRetrySchedule = Schedule.either(
+const llmInvalidOutputRetrySchedule = Schedule.min([
   Schedule.exponential("300 millis"),
   Schedule.spaced("1 second"),
-).pipe(
-  Schedule.take(2),
-  Schedule.delays,
-  Schedule.tapOutput(
-    Effect.fn(function* (delay) {
-      const retryAt = DateTime.addDuration(yield* DateTime.now, delay);
+]).pipe(
+  Schedule.upTo({ times: 2 }),
+  Schedule.tap(({ duration }) =>
+    Effect.gen(function* () {
+      const retryAt = DateTime.addDuration(yield* DateTime.now, duration);
       yield* Effect.annotateCurrentSpan({
-        retry_delay: Duration.format(delay).replace(/\s+\d+ns$/, ""),
+        retry_delay: Duration.format(duration).replace(/\s+\d+ns$/, ""),
         retry_at: DateTime.formatIso(retryAt),
       });
     }),
   ),
 );
 
-const hookRetrySchedule = Schedule.either(
+const hookRetrySchedule = Schedule.min([
   Schedule.exponential("200 millis"),
   Schedule.spaced("1 second"),
-).pipe(
-  Schedule.take(maxHookRetries - 1),
-  Schedule.delays,
-  Schedule.tapOutput(
-    Effect.fn(function* (delay) {
-      const retryAt = DateTime.addDuration(yield* DateTime.now, delay);
+]).pipe(
+  Schedule.upTo({ times: maxHookRetries - 1 }),
+  Schedule.tap(({ duration }) =>
+    Effect.gen(function* () {
+      const retryAt = DateTime.addDuration(yield* DateTime.now, duration);
       yield* Effect.annotateCurrentSpan({
-        retry_delay: Duration.format(delay).replace(/\s+\d+ns$/, ""),
+        retry_delay: Duration.format(duration).replace(/\s+\d+ns$/, ""),
         retry_at: DateTime.formatIso(retryAt),
       });
     }),
