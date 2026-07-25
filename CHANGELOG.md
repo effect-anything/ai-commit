@@ -1,5 +1,11 @@
 # @effect-x/ai-commit
 
+## 0.0.5
+
+### Patch Changes
+
+- b362de9: Migrate retry schedules for Effect v4.
+
 ## 0.0.4
 
 ### Patch Changes
